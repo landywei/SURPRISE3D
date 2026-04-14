@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Surprise3D | NeurIPS 2025</title>
+  <meta name="description" content="Surprise3D: A Dataset for Spatial Understanding and Reasoning in Complex 3D Scenes. NeurIPS 2025, Datasets and Benchmarks Track.">
+  <meta name="keywords" content="Surprise3D, 3D spatial reasoning, dataset, benchmark, NeurIPS 2025, ScanNet++, point cloud, vision-language">
+  <meta property="og:title" content="Surprise3D: A Dataset for Spatial Understanding and Reasoning in Complex 3D Scenes">
+  <meta property="og:description" content="200k+ vision-language pairs, 900+ scenes, 89k+ spatial queries without object names. NeurIPS 2025 D&B.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700;900&family=Charter:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    :root {
+      --c-bg: #f2f0eb;
+      --c-bg-warm: #eae7e0;
+      --c-surface: #faf9f6;
+      --c-accent: #7b6ca5;
+      --c-accent-deep: #5d4f8a;
+      --c-accent-light: #b8aed4;
+      --c-accent-mist: #ddd6ee;
+      --c-amber: #c49a42;
+      --c-amber-light: #e8d5a8;
+      --c-text: #3a3a38;
+      --c-text-sec: #6a6a66;
+      --c-text-light: #8a8a86;
+      --c-border: #d5d2cc;
+      --font-heading: 'Charter', Georgia, serif;
+      --font-body: 'Lato', system-ui, sans-serif;
+      --max-w: 880px;
+      --radius: 10px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { font-family: var(--font-body); color: var(--c-text); background: var(--c-bg); line-height: 1.72; -webkit-font-smoothing: antialiased; }
+
+    /* ── Language Toggle ── */
+    .lang-toggle { position: fixed; top: 16px; right: 16px; z-index: 999; display: flex; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 20px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .lang-btn { padding: 6px 16px; font-size: 0.82rem; font-family: var(--font-body); font-weight: 700; border: none; cursor: pointer; transition: all .25s; background: transparent; color: var(--c-text-sec); letter-spacing: 0.5px; }
+    .lang-btn.active { background: var(--c-accent); color: #fff; }
+    .lang-btn:hover:not(.active) { background: var(--c-accent-mist); }
+    [lang-cn] { display: none; }
+    body.zh [lang-en] { display: none; }
+    body.zh [lang-cn] { display: unset; }
+
+    /* ── Hero ── */
+    .hero { text-align: center; padding: 72px 20px 36px; background: linear-gradient(175deg, var(--c-accent-mist) 0%, var(--c-bg) 55%); position: relative; overflow: hidden; }
+    .hero::before { content: ''; position: absolute; top: -120px; left: -80px; width: 360px; height: 360px; background: radial-gradient(circle, rgba(123,108,165,0.1) 0%, transparent 70%); border-radius: 50%; }
+    .venue { display: inline-block; background: var(--c-accent); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 5px 18px; border-radius: 20px; letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 16px; }
+    .hero h1 { font-family: var(--font-heading); font-size: clamp(1.4rem, 3.5vw, 2.1rem); font-weight: 700; line-height: 1.32; max-width: 780px; margin: 0 auto 18px; }
+    .authors { font-size: 0.92rem; color: var(--c-text-sec); max-width: 700px; margin: 0 auto 6px; line-height: 1.8; }
+    .authors sup { font-size: 0.65em; color: var(--c-accent); }
+    .affil { font-size: 0.82rem; color: var(--c-text-light); margin-bottom: 22px; }
+    .affil sup { font-size: 0.65em; color: var(--c-accent); }
+
+    /* ── Link Bar ── */
+    .links { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+    .lnk { display: inline-flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; text-decoration: none; border: 1.5px solid var(--c-border); color: var(--c-text); background: var(--c-surface); transition: all .22s; }
+    .lnk:hover { border-color: var(--c-accent); color: var(--c-accent-deep); box-shadow: 0 3px 14px rgba(123,108,165,0.15); transform: translateY(-1px); }
+
+    .wrap { max-width: var(--max-w); margin: 0 auto; padding: 0 20px; }
+
+    /* ── Teaser ── */
+    .teaser { text-align: center; margin: 40px auto 48px; max-width: var(--max-w); padding: 0 20px; }
+    .teaser img { width: 100%; border-radius: var(--radius); box-shadow: 0 6px 28px rgba(0,0,0,0.07); }
+    .teaser figcaption { margin-top: 10px; font-size: 0.84rem; color: var(--c-text-light); max-width: 700px; margin-left: auto; margin-right: auto; }
+
+    /* ── Sections ── */
+    section { margin-bottom: 48px; }
+    .sec-title { font-family: var(--font-heading); font-size: 1.35rem; font-weight: 700; margin-bottom: 16px; color: var(--c-text); display: flex; align-items: center; gap: 10px; }
+    .sec-title::before { content: ''; width: 4px; height: 22px; background: var(--c-accent); border-radius: 2px; flex-shrink: 0; }
+    section p { margin-bottom: 12px; color: var(--c-text-sec); font-size: 0.95rem; }
+    section strong { color: var(--c-text); }
+
+    /* ── Stats Bar ── */
+    .stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+    .stat { flex: 1; min-width: 140px; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius); padding: 16px; text-align: center; transition: all .2s; }
+    .stat:hover { border-color: var(--c-accent); }
+    .stat-num { font-size: 1.6rem; font-weight: 900; color: var(--c-accent-deep); font-family: var(--font-heading); }
+    .stat-label { font-size: 0.78rem; color: var(--c-text-sec); margin-top: 2px; }
+
+    /* ── Reasoning Cards ── */
+    .reason-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+    .reason-card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius); padding: 16px; transition: all .2s; }
+    .reason-card:hover { border-color: var(--c-accent); box-shadow: 0 3px 14px rgba(123,108,165,0.1); }
+    .reason-card h4 { font-size: 0.88rem; color: var(--c-accent-deep); margin-bottom: 6px; }
+    .reason-card .query { font-style: italic; font-size: 0.82rem; color: var(--c-text-sec); }
+
+    /* ── Table ── */
+    .tbl-wrap { overflow-x: auto; margin: 14px 0; border-radius: var(--radius); border: 1px solid var(--c-border); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    thead { background: var(--c-accent-mist); }
+    th { padding: 10px 14px; font-weight: 700; color: var(--c-accent-deep); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
+    td { padding: 9px 14px; text-align: center; border-top: 1px solid var(--c-border); color: var(--c-text-sec); }
+    th:first-child, td:first-child { text-align: left; }
+
+    /* ── Figure ── */
+    .fig { margin: 24px 0; text-align: center; }
+    .fig img { max-width: 100%; border-radius: var(--radius); box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+    .fig figcaption { margin-top: 8px; font-size: 0.82rem; color: var(--c-text-light); }
+
+    /* ── Companion Banner ── */
+    .companion { background: linear-gradient(135deg, var(--c-accent-mist), #e8e4d8); border-radius: var(--radius); padding: 26px 28px; display: flex; align-items: center; gap: 20px; }
+    .companion-icon { font-size: 2.2rem; flex-shrink: 0; }
+    .companion-text h3 { font-family: var(--font-heading); font-size: 1rem; margin-bottom: 4px; }
+    .companion-text p { font-size: 0.86rem; margin: 0; color: var(--c-text-sec); }
+    .companion-text a { color: var(--c-accent-deep); font-weight: 700; text-decoration: none; }
+    .companion-text a:hover { text-decoration: underline; }
+
+    /* ── BibTeX ── */
+    .bib { position: relative; background: var(--c-bg-warm); border: 1px solid var(--c-border); border-radius: var(--radius); padding: 18px 20px; font-family: 'Courier New', monospace; font-size: 0.78rem; line-height: 1.55; overflow-x: auto; white-space: pre; color: var(--c-text-sec); }
+    .copy-btn { position: absolute; top: 8px; right: 10px; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 6px; padding: 3px 12px; font-size: 0.75rem; cursor: pointer; transition: all .2s; color: var(--c-text-light); font-family: var(--font-body); }
+    .copy-btn:hover { border-color: var(--c-accent); color: var(--c-accent-deep); }
+
+    footer { text-align: center; padding: 36px 20px; font-size: 0.78rem; color: var(--c-text-light); border-top: 1px solid var(--c-border); margin-top: 48px; }
+    footer a { color: var(--c-accent); text-decoration: none; }
+
+    @media (max-width: 640px) {
+      .hero { padding: 52px 14px 28px; }
+      .stats { flex-direction: column; }
+      .reason-grid { grid-template-columns: 1fr; }
+      .companion { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="lang-toggle">
+  <button class="lang-btn active" id="btn-en" onclick="setLang('en')">EN</button>
+  <button class="lang-btn" id="btn-cn" onclick="setLang('zh')">中文</button>
+</div>
+
+<!-- ═══ HERO ═══ -->
+<header class="hero">
+  <span class="venue">NeurIPS 2025 · Datasets &amp; Benchmarks</span>
+  <h1>
+    <span lang-en>Surprise3D: A Dataset for Spatial Understanding and Reasoning in Complex 3D Scenes</span>
+    <span lang-cn>Surprise3D: 面向复杂3D场景空间理解与推理的数据集</span>
+  </h1>
+  <p class="authors">
+    <strong>Jiaxin Huang</strong><sup>1,2</sup>&nbsp;
+    <strong>Ziwen Li</strong><sup>3</sup>&nbsp;
+    <strong>Hanlue Zhang</strong><sup>3</sup>&nbsp;
+    <strong>Runnan Chen</strong><sup>1</sup>&nbsp;
+    <strong>Zhengqing Gao</strong><sup>4</sup>&nbsp;
+    <strong>Xiao He</strong><sup>2</sup>&nbsp;
+    <strong>Yandong Guo</strong><sup>2</sup>&nbsp;
+    <strong>Wenping Wang</strong><sup>4</sup>&nbsp;
+    <strong>Tongliang Liu</strong><sup>3&dagger;</sup>&nbsp;
+    <strong>Mingming Gong</strong><sup>5&dagger;</sup>
+  </p>
+  <p class="affil">
+    <sup>1</sup>MBZUAI&ensp;<sup>2</sup>AI2Robotics&ensp;<sup>3</sup>University of Sydney&ensp;<sup>4</sup>Texas A&amp;M University&ensp;<sup>5</sup>University of Melbourne<br>
+    <span lang-en><sup>&dagger;</sup>Corresponding authors</span>
+    <span lang-cn><sup>&dagger;</sup>通讯作者</span>
+  </p>
+  <div class="links">
+    <a class="lnk" href="https://arxiv.org/abs/2507.07781" target="_blank"><i class="ai ai-arxiv"></i> arXiv</a>
+    <a class="lnk" href="https://arxiv.org/pdf/2507.07781" target="_blank"><i class="fas fa-file-pdf"></i> Paper</a>
+    <a class="lnk" href="https://github.com/liziwennba/SURPRISE3D" target="_blank"><i class="fab fa-github"></i> Code</a>
+    <a class="lnk" href="https://huggingface.co/datasets/hhllzz/surprise-3d" target="_blank">🤗 Dataset</a>
+    <a class="lnk" href="https://github.com/tmllab/2025_NeurIPS_MLLM-For3D" target="_blank"><i class="fas fa-link"></i> MLLM-For3D</a>
+    <a class="lnk" href="#bib"><i class="fas fa-quote-right"></i> BibTeX</a>
+  </div>
+</header>
+
+<!-- ═══ TEASER ═══ -->
+<figure class="teaser">
+  <img src="assets/task.png" alt="Surprise3D task overview" loading="lazy">
+  <figcaption>
+    <span lang-en><b>Surprise3D</b> covers both <em>spatial reasoning</em> (relative position, narrative/parametric perspective, absolute distance) and <em>knowledge reasoning</em> (common sense, human intention) — with queries that deliberately exclude object names.</span>
+    <span lang-cn><b>Surprise3D</b> 涵盖<em>空间推理</em>（相对位置、叙事/参数视角、绝对距离）和<em>知识推理</em>（常识、人类意图）——查询中刻意排除了目标对象名称。</span>
+  </figcaption>
+</figure>
+
+<div class="wrap">
+
+  <!-- ═══ STATS ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>Dataset at a Glance</span>
+      <span lang-cn>数据集概览</span>
+    </h2>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-num">900+</div>
+        <div class="stat-label" lang-en>Indoor Scenes<br>(ScanNet++ v2)</div>
+        <div class="stat-label" lang-cn>室内场景<br>(ScanNet++ v2)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">200k+</div>
+        <div class="stat-label" lang-en>Vision-Language<br>Pairs</div>
+        <div class="stat-label" lang-cn>视觉-语言<br>对</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">89k+</div>
+        <div class="stat-label" lang-en>Human-Annotated<br>Spatial Queries</div>
+        <div class="stat-label" lang-cn>人工标注<br>空间查询</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">2,800+</div>
+        <div class="stat-label" lang-en>Unique Object<br>Classes</div>
+        <div class="stat-label" lang-cn>唯一对象<br>类别</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ MOTIVATION ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>Why Surprise3D?</span>
+      <span lang-cn>为什么需要Surprise3D？</span>
+    </h2>
+    <p lang-en>
+      Current 3D vision-language datasets let models take <strong>semantic shortcuts</strong> — they match object names in queries rather than truly reasoning about spatial relationships. We found that even strong multimodal models <strong>drop to near-zero accuracy</strong> on pure spatial reasoning tasks when object names are removed.
+    </p>
+    <p lang-cn>
+      当前的3D视觉-语言数据集允许模型走<strong>语义捷径</strong>——它们匹配查询中的对象名称，而非真正推理空间关系。我们发现，当移除对象名称后，即使是强大的多模态模型在纯空间推理任务上的<strong>准确率也接近于零</strong>。
+    </p>
+    <p lang-en>
+      <strong>Surprise3D fixes this</strong> by crafting queries that describe spatial relationships <strong>without naming the target object</strong>, covering four distinct spatial reasoning skills with human-written queries, and providing the first standardized <strong>3D Spatial Reasoning Segmentation (3D-SRS)</strong> benchmark.
+    </p>
+    <p lang-cn>
+      <strong>Surprise3D</strong> 通过以下方式解决这一问题：构建<strong>不包含目标对象名称</strong>的空间关系描述查询，覆盖四种不同的空间推理技能的人工标注查询，并提供首个标准化的<strong>3D空间推理分割（3D-SRS）</strong>基准。
+    </p>
+  </section>
+
+  <!-- ═══ REASONING TYPES ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>Spatial Reasoning Types</span>
+      <span lang-cn>空间推理类型</span>
+    </h2>
+    <div class="reason-grid">
+      <div class="reason-card">
+        <h4 lang-en>Relative Position</h4>
+        <h4 lang-cn>相对位置</h4>
+        <div class="query" lang-en>"Find the object behind the chair"</div>
+        <div class="query" lang-cn>"找到椅子后面的物体"</div>
+      </div>
+      <div class="reason-card">
+        <h4 lang-en>Narrative Perspective</h4>
+        <h4 lang-cn>叙事视角</h4>
+        <div class="query" lang-en>"Entering the door, with your back to the door, the object on your left side"</div>
+        <div class="query" lang-cn>"进门后，背对门，你左手边的物体"</div>
+      </div>
+      <div class="reason-card">
+        <h4 lang-en>Parametric Perspective</h4>
+        <h4 lang-cn>参数视角</h4>
+        <div class="query" lang-en>"At the perspective (3.00, -0.76, -1.24, 0.19, 0.025, 0.034, 0.00, -1.00), what's the closest object to sit?"</div>
+        <div class="query" lang-cn>"在视角(3.00, -0.76, -1.24, ...)处，最近的可坐物体是什么？"</div>
+      </div>
+      <div class="reason-card">
+        <h4 lang-en>Absolute Distance</h4>
+        <h4 lang-cn>绝对距离</h4>
+        <div class="query" lang-en>"A chair that is 2.63 meters away from the balcony door"</div>
+        <div class="query" lang-cn>"距阳台门2.63米的椅子"</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ DATA ANALYSIS ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>Data Analysis</span>
+      <span lang-cn>数据分析</span>
+    </h2>
+    <figure class="fig">
+      <img src="assets/data_analysis.png" alt="Data analysis and statistics" loading="lazy">
+      <figcaption>
+        <span lang-en>Left: question mention enhancement for low-frequency objects. Center: object frequency distribution. Right: distribution of question types across spatial and knowledge reasoning categories.</span>
+        <span lang-cn>左：低频对象的查询增强。中：对象频率分布。右：空间推理和知识推理类别的查询类型分布。</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ═══ ANNOTATION PIPELINE ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>Annotation Pipeline</span>
+      <span lang-cn>标注流水线</span>
+    </h2>
+    <p lang-en>
+      Surprise3D annotations are built through <strong>two complementary pipelines</strong>: a human spatial annotation process for high-quality spatial queries, and an automatic generation pipeline for scalable knowledge-based queries.
+    </p>
+    <p lang-cn>
+      Surprise3D 的标注通过<strong>两条互补的流水线</strong>构建：用于高质量空间查询的人工空间标注流程，以及用于可扩展知识类查询的自动生成流水线。
+    </p>
+
+    <h3 style="font-family:var(--font-heading);font-size:1.05rem;margin:20px 0 10px;color:var(--c-accent-deep)">
+      <span lang-en>1. Spatial Annotation (Human)</span>
+      <span lang-cn>1. 空间标注（人工）</span>
+    </h3>
+    <figure class="fig">
+      <img src="assets/spatial_annotation_pipline (1).pdf" alt="Spatial annotation pipeline" loading="lazy" style="background:#fff;padding:8px;">
+      <figcaption>
+        <span lang-en><b>Step 1:</b> Volunteers select a 3D scene. <b>Step 2:</b> They write spatial descriptions under two situations — <em>Situation 1</em>: describe their orientation and an object's position relative to it (narrative/parametric perspective); <em>Situation 2</em>: describe the spatial relationship between objects (relative position, absolute distance). <b>Step 3:</b> They verify and choose the correct target objects in the 3D scene.</span>
+        <span lang-cn><b>步骤1：</b>志愿者选择一个3D场景。<b>步骤2：</b>在两种情境下编写空间描述——<em>情境1</em>：描述自己的朝向以及对象相对于该朝向的位置（叙事/参数视角）；<em>情境2</em>：描述对象之间的空间关系（相对位置、绝对距离）。<b>步骤3：</b>在3D场景中验证并选择正确的目标对象。</span>
+      </figcaption>
+    </figure>
+
+    <h3 style="font-family:var(--font-heading);font-size:1.05rem;margin:20px 0 10px;color:var(--c-accent-deep)">
+      <span lang-en>2. Automatic Pipeline (LLM + Human Verification)</span>
+      <span lang-cn>2. 自动流水线（LLM + 人工验证）</span>
+    </h3>
+    <figure class="fig">
+      <img src="assets/automatic_pipeline (1).png" alt="Automatic annotation and cleaning pipeline" loading="lazy">
+      <figcaption>
+        <span lang-en>For knowledge-based queries (common sense, human intention): LLM generates initial Q&A pairs from scene metadata and object frequencies, then an automated quality-control stage with human-in-the-loop verification identifies and corrects problematic queries (e.g., where the answer refers to the spatial reference itself rather than the target).</span>
+        <span lang-cn>对于知识类查询（常识、人类意图）：LLM从场景元数据和对象频率生成初始问答对，随后通过自动化质量控制阶段配合人工验证，识别并修正有问题的查询（例如答案指向空间参考本身而非目标对象的情况）。</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ═══ BENCHMARK ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>3D-SRS Benchmark Results</span>
+      <span lang-cn>3D-SRS基准结果</span>
+    </h2>
+    <p lang-en>
+      We evaluate state-of-the-art 3D visual grounding methods and 3D-LLMs under both zero-shot and fine-tuned settings. Results reveal significant challenges — even strong models struggle with pure spatial reasoning.
+    </p>
+    <p lang-cn>
+      我们在零样本和微调设置下评估了最先进的3D视觉定位方法和3D-LLM。结果揭示了巨大挑战——即使是强模型也难以应对纯空间推理。
+    </p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Setting</th><th>mIoU</th><th>Acc@0.25</th><th>Acc@0.50</th></tr></thead>
+        <tbody>
+          <tr><td>3D-Vista</td><td>Zero-shot</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>ChatScene</td><td>Zero-shot</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>MLLM-For3D</td><td>Zero-shot</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>Intent3D</td><td>Fine-tuned</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>Reason3D</td><td>Fine-tuned</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr style="background:rgba(123,108,165,0.08);font-weight:700"><td style="color:var(--c-accent-deep)">MLLM-For3D</td><td>Fine-tuned</td><td>—</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.82rem;margin-top:8px;color:var(--c-text-light)">
+      <!-- TODO: Fill in numbers from arXiv:2507.07781 -->
+      <span lang-en>See the <a href="https://arxiv.org/abs/2507.07781" style="color:var(--c-accent)">paper</a> for complete results broken down by reasoning type.</span>
+      <span lang-cn>按推理类型细分的完整结果请参阅<a href="https://arxiv.org/abs/2507.07781" style="color:var(--c-accent)">论文</a>。</span>
+    </p>
+  </section>
+
+  <!-- ═══ DOWNLOAD ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>Get the Data</span>
+      <span lang-cn>获取数据</span>
+    </h2>
+    <p lang-en>Surprise3D annotations are publicly available on HuggingFace. The underlying 3D scenes come from ScanNet++ v2 (requires separate access request).</p>
+    <p lang-cn>Surprise3D标注数据已在HuggingFace上公开发布。底层3D场景数据来自ScanNet++ v2（需单独申请访问权限）。</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">
+      <a class="lnk" href="https://huggingface.co/datasets/hhllzz/surprise-3d" target="_blank" style="background:var(--c-accent);color:#fff;border-color:var(--c-accent)">🤗 Download from HuggingFace</a>
+      <a class="lnk" href="https://kaldir.vc.in.tum.de/scannetpp/" target="_blank">ScanNet++ v2 (Scene Data)</a>
+    </div>
+  </section>
+
+  <!-- ═══ COMPANION ═══ -->
+  <section>
+    <div class="companion">
+      <span class="companion-icon">🔗</span>
+      <div class="companion-text">
+        <h3>
+          <span lang-en>Companion Work: MLLM-For3D (NeurIPS 2025)</span>
+          <span lang-cn>关联工作：MLLM-For3D（NeurIPS 2025）</span>
+        </h3>
+        <p>
+          <span lang-en>Label-free 3D reasoning segmentation via 2D-to-3D MLLM knowledge transfer. Achieves +55% mIoU improvement without any 3D annotations.</span>
+          <span lang-cn>通过2D到3D的MLLM知识迁移实现无标注3D推理分割。在无需任何3D标注的情况下，mIoU提升55%。</span>
+          <br><br>
+          <a href="https://arxiv.org/abs/2503.18135">Paper</a>&ensp;·&ensp;
+          <a href="https://github.com/tmllab/2025_NeurIPS_MLLM-For3D">Code</a>&ensp;·&ensp;
+          <a href="https://tmllab.github.io/2025_NeurIPS_MLLM-For3D/">Project Page</a>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ BIBTEX ═══ -->
+  <section id="bib">
+    <h2 class="sec-title">BibTeX</h2>
+    <div class="bib">
+      <button class="copy-btn" onclick="copyBib()">📋 Copy</button>
+@inproceedings{huang2025surprise3d,
+  title     = {SURPRISE3D: A Dataset for Spatial Understanding
+               and Reasoning in Complex 3D Scenes},
+  author    = {Huang, Jiaxin and Li, Ziwen and Zhang, Hanlue
+               and Chen, Runnan and Gao, Zhengqing and He, Xiao
+               and Guo, Yandong and Wang, Wenping
+               and Liu, Tongliang and Gong, Mingming},
+  booktitle = {Advances in Neural Information Processing
+               Systems (NeurIPS), Datasets and Benchmarks},
+  year      = {2025}
+}</div>
+  </section>
+
+  <!-- ═══ ACK ═══ -->
+  <section>
+    <h2 class="sec-title">
+      <span lang-en>Acknowledgements</span>
+      <span lang-cn>致谢</span>
+    </h2>
+    <p>
+      <span lang-en>We thank the authors of <a href="https://github.com/KuanchihHuang/Reason3D">Reason3D</a>, <a href="https://github.com/WeitaiKang/Intent3D">Intent3D</a>, and the <a href="https://kaldir.vc.in.tum.de/scannetpp/">ScanNet++</a> team for their outstanding work and data.</span>
+      <span lang-cn>感谢 <a href="https://github.com/KuanchihHuang/Reason3D">Reason3D</a>、<a href="https://github.com/WeitaiKang/Intent3D">Intent3D</a> 的作者和 <a href="https://kaldir.vc.in.tum.de/scannetpp/">ScanNet++</a> 团队的杰出工作和数据。</span>
+    </p>
+  </section>
+</div>
+
+<footer>
+  <span lang-en>&copy; 2025 Surprise3D Authors. Template inspired by <a href="https://nerfies.github.io">Nerfies</a>.</span>
+  <span lang-cn>&copy; 2025 Surprise3D 作者团队。页面模板参考 <a href="https://nerfies.github.io">Nerfies</a>。</span>
+</footer>
+
+<script>
+function setLang(lang) {
+  document.body.classList.toggle('zh', lang === 'zh');
+  document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+  document.getElementById('btn-cn').classList.toggle('active', lang === 'zh');
+}
+function copyBib() {
+  const t = document.querySelector('.bib').textContent.replace('📋 Copy','').trim();
+  navigator.clipboard.writeText(t).then(() => {
+    const b = document.querySelector('.copy-btn');
+    b.textContent = '✓ Copied!';
+    setTimeout(() => b.textContent = '📋 Copy', 1800);
+  });
+}
+</script>
+</body>
+</html>
