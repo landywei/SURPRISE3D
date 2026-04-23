@@ -46,6 +46,12 @@ datasets:
       # Same as eval: drop rows whose object_id never appears in sampled_instance_anno_id (top100 / labeling),
       # otherwise __getitem__ asserts on an empty GT mask.
       filter_missing_gt_in_pth: true
+      # Speed up *subsequent* runs: first job with instance_id_cache_write: true builds this JSON (one-time heavy torch.load per scene);
+      # later runs set instance_id_cache_write: false and reuse the file (no .pth reads during filter).
+      instance_id_cache_file: "/data/scannetpp/processed/.reason3d_instance_ids.json"
+      instance_id_cache_write: false
+      # Optional: dump filtered QA list after all filters (use as ann path next time; still use instance cache for speed).
+      # write_filtered_annotations_to: "/data/annotations/surprise_train.filtered.json"
     text_processor:
       train:
         name: "blip_question"

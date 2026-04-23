@@ -12,6 +12,30 @@ Paths below match the **default YAMLs** in this fork (`/data/...`). Adjust sourc
 | Surprise annotations | `/data/annotations/surprise_train.json`, `surprise_val.json` | YAML `build_info.annotations` |
 | Optional: ScanNet++ tools / maps | under `scannetpp` | e.g. `benchmark_file_lists`, `data/` meshes — only if you re-run preprocessing |
 
+### What **training** (`train.py` / `ThreeDReferDataset`) actually reads under `/data/scannetpp`
+
+With the default Surprise finetune config (`build_info.points.storage: /data/scannetpp` and `dataset_init.pth_rel_subdir: processed`), the dataloader **only** touches:
+
+```text
+/data/scannetpp/processed/<scene_id>.pth
+```
+
+one file per scene that appears in your train/val JSON (and, with `filter_missing_gt_in_pth`, each unique scene is loaded once at init to build the instance-id cache). Keys used from each `.pth` include at least: `sampled_coords`, `sampled_colors`, `superpoints`, `sampled_labels`, `sampled_instance_anno_id` (and related tensors the collater expects).
+
+**You do not need** the rest of the ScanNet++ tree (`data/<scene>/meshes`, `semantic/`, raw scans, etc.) **for training/inference** if those `.pth` files are already built on the old cluster.
+
+**Sync first (minimal):**
+
+```bash
+rsync -avh --progress OLD:/data/scannetpp/processed/ NEW:/data/scannetpp/processed/
+```
+
+If you use **`pth_rel_subdir: processed_trial`** (or another folder name), sync **that** directory instead.
+
+**Separate from training:** rebuilding `.pth` or running `update_superpoints.py` needs extra paths (e.g. meshes under `data/<scene_id>/scans/mesh_aligned_0.05.ply` and UniDet `*superpoints.npy`). See `update_superpoints.py` and your `scannetpp_tools` prep pipeline—only rsync those if you will **re-preprocess** on the new cluster.
+
+**Instance-id cache (optional, small JSON):** if you use `dataset_init.instance_id_cache_file` under `processed/` (see `reason3d_surprise_finetune.yaml`), **rsync that file too** so the new cluster skips the long “filter” `torch.load` pass on first job.
+
 **Hugging Face model cache** (not under `/data` by default): first run downloads **FLAN-T5-XL**, **BERT**, etc. Either:
 
 - Rsync `~/.cache/huggingface/` (or your `HF_HOME`) from the old cluster, or  

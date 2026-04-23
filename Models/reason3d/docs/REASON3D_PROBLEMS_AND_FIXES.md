@@ -147,11 +147,21 @@ Log sits on **“Building datasets…”** for 5–15+ minutes.
 
 ### Cause
 
-With **`filter_missing_gt_in_pth`**, init does **one full `torch.load` per unique scene** to build the instance-id cache. Hundreds of large **`.pth`** files on **network / HDD** storage is slow, but **runs once per process**.
+With **`filter_missing_gt_in_pth`**, init does **one full `torch.load` per unique scene** (first time that scene is seen) to read **`sampled_instance_anno_id`** and decide which QA rows to keep. Hundreds of large **`.pth`** files on **network / HDD** storage is slow, but **runs once per process** unless you restart workers.
 
-### Fix (observability)
+### Fixes
 
-Log before filtering: **how many unique scenes** will be read so operators know a long pause is expected—not a hang.
+1. **Observability:** a log line states **how many unique scenes** may be read so a long pause is not mistaken for a hang.
+
+2. **Persisted instance-id cache (recommended on clusters):** set in **`dataset_init`**:
+
+   - **`instance_id_cache_file`**: path to a JSON file (e.g. under `processed/`, same disk as `.pth`).
+   - **`instance_id_cache_write: true`** on **one** run that is allowed to read all `.pth` files; the file stores `scene_id → list of instance ids` plus **`missing_pth`** for scenes with no file.
+   - Set **`instance_id_cache_write: false`** on later runs; the dataset **loads the JSON** and filters **without** re-`torch.load` every scene (only loads `.pth` for scenes **missing** from the cache, e.g. new scenes).
+
+   Invalidate or delete the cache file if you **regenerate** `.pth` files or change **`pth_rel_subdir`** / **`pts_root`** (the file records those paths and refuses to load if they mismatch).
+
+3. **Optional filtered JSON dump:** **`write_filtered_annotations_to`** writes the **post-filter** annotation list to a JSON file (rank 0 only). You can point **`build_info.annotations.train.storage`** at that file for reproducibility; **still** use the instance cache for fast init unless you also disable **`filter_missing_gt_in_pth`** (not recommended if `.pth` can change).
 
 ---
 

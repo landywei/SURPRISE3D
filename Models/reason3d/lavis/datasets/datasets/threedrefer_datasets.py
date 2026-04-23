@@ -19,6 +19,7 @@ import torch_scatter
 from typing import Dict, Optional, Sequence, Set, Tuple, Union
 import tracemalloc
 from lavis.datasets.datasets.base_dataset import BaseDataset
+from lavis.common.dist_utils import is_main_process
 import glob
 import random
 
@@ -34,6 +35,9 @@ class ThreeDReferDataset(BaseDataset):
         eval_scene_ids=None,
         eval_scene_allowlist_file=None,
         eval_max_samples=None,
+        instance_id_cache_file=None,
+        instance_id_cache_write=False,
+        write_filtered_annotations_to=None,
     ):
         """
         vis_root (string): Root directory of images (e.g. coco/images/)
@@ -44,6 +48,15 @@ class ThreeDReferDataset(BaseDataset):
         self.eval_max_samples = eval_max_samples
         self._eval_scene_set: Optional[Set[str]] = None
         self._pth_inst_cache: Dict[str, Optional[Set[int]]] = {}
+        self._instance_id_cache_path: Optional[str] = None
+        if instance_id_cache_file:
+            p = str(instance_id_cache_file).strip().strip('"').strip("'")
+            self._instance_id_cache_path = osp.abspath(osp.expanduser(p)) if p else None
+        self._instance_id_cache_write = bool(instance_id_cache_write)
+        self._write_filtered_ann_path: Optional[str] = None
+        if write_filtered_annotations_to:
+            w = str(write_filtered_annotations_to).strip().strip('"').strip("'")
+            self._write_filtered_ann_path = osp.abspath(osp.expanduser(w)) if w else None
         self.scene_ids = {}
         n = 0
         self.use_xyz = True
@@ -70,14 +83,26 @@ class ThreeDReferDataset(BaseDataset):
         self.annotation = new_annotation
         if filter_missing_gt_in_pth:
             uniq_scenes = {a.get("scene_id") for a in self.annotation if a.get("scene_id") is not None}
-            logging.info(
-                "ThreeDReferDataset: filter_missing_gt_in_pth will torch.load up to %d unique scene .pth "
-                "files under %s (subdir=%s). One full read per scene to cache instance ids; on full train "
-                "or slow/network storage this often takes several minutes and runs only once at init.",
-                len(uniq_scenes),
-                self.pts_root,
-                self.pth_rel_subdir,
-            )
+            cache_loaded = False
+            if self._instance_id_cache_path:
+                cache_loaded = self._try_load_instance_id_cache()
+            if cache_loaded:
+                logging.info(
+                    "ThreeDReferDataset: filter_missing_gt_in_pth using instance-id cache %r "
+                    "(%d scenes in cache; filtering without re-reading each .pth unless a scene is missing).",
+                    self._instance_id_cache_path,
+                    len([k for k, v in self._pth_inst_cache.items() if v is not None]),
+                )
+            else:
+                logging.info(
+                    "ThreeDReferDataset: filter_missing_gt_in_pth will torch.load up to %d unique scene .pth "
+                    "files under %s (subdir=%s). One full read per scene to cache instance ids; on full train "
+                    "or slow/network storage this often takes several minutes and runs only once at init. "
+                    "To skip next time, set dataset_init.instance_id_cache_file and instance_id_cache_write: true once.",
+                    len(uniq_scenes),
+                    self.pts_root,
+                    self.pth_rel_subdir,
+                )
             before = len(self.annotation)
             self.annotation = [a for a in self.annotation if self._ann_has_target_in_pth(a)]
             logging.info(
@@ -91,6 +116,12 @@ class ThreeDReferDataset(BaseDataset):
                 raise RuntimeError(
                     "All annotations were filtered out (no object_id in sampled_instance_anno_id). "
                     "Check pth paths and dataset_init.pth_rel_subdir."
+                )
+            if self._instance_id_cache_write and self._instance_id_cache_path and is_main_process():
+                self._write_instance_id_cache()
+            elif self._instance_id_cache_write and not self._instance_id_cache_path and is_main_process():
+                logging.warning(
+                    "ThreeDReferDataset: instance_id_cache_write is true but instance_id_cache_file is unset; not writing cache."
                 )
 
         scene_allow = self._build_eval_scene_allowlist(eval_scene_ids, eval_scene_allowlist_file)
@@ -132,6 +163,19 @@ class ThreeDReferDataset(BaseDataset):
                 )
                 self.annotation = self.annotation[:cap]
 
+        if self._write_filtered_ann_path and is_main_process():
+            wp = self._write_filtered_ann_path
+            d = osp.dirname(wp)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(wp, "w", encoding="utf-8") as f:
+                json.dump(self.annotation, f, ensure_ascii=False)
+            logging.info(
+                "ThreeDReferDataset: wrote %d filtered annotations to %r (for faster re-runs, point train JSON here).",
+                len(self.annotation),
+                wp,
+            )
+
         self.sp_filenames = self.get_sp_filenames()
         self.short_question_list = QUESTION_LIST
         self.answer_list = ANSWER_LIST
@@ -162,6 +206,95 @@ class ThreeDReferDataset(BaseDataset):
         oid = ann["object_id"]
         ids = [int(x) for x in oid] if isinstance(oid, list) else [int(oid)]
         return any(i in u for i in ids)
+
+    _INSTANCE_CACHE_VERSION = "reason3d_instance_id_cache_v1"
+
+    def _try_load_instance_id_cache(self) -> bool:
+        path = self._instance_id_cache_path
+        if not path or not osp.isfile(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                blob = json.load(f)
+        except Exception as e:
+            logging.warning("ThreeDReferDataset: could not read instance_id_cache_file %r: %s", path, e)
+            return False
+        if blob.get("format") != self._INSTANCE_CACHE_VERSION:
+            logging.warning("ThreeDReferDataset: instance cache %r has wrong format key; ignoring.", path)
+            return False
+        if osp.abspath(blob.get("pts_root", "")) != osp.abspath(self.pts_root):
+            logging.warning(
+                "ThreeDReferDataset: instance cache pts_root mismatch (cache=%r current=%r); ignoring.",
+                blob.get("pts_root"),
+                self.pts_root,
+            )
+            return False
+        if str(blob.get("pth_rel_subdir", "")) != str(self.pth_rel_subdir):
+            logging.warning(
+                "ThreeDReferDataset: instance cache pth_rel_subdir mismatch (cache=%r current=%r); ignoring.",
+                blob.get("pth_rel_subdir"),
+                self.pth_rel_subdir,
+            )
+            return False
+        inst = blob.get("instance_sets") or {}
+        missing = set(blob.get("missing_pth") or [])
+        for sid, ids in inst.items():
+            if not isinstance(ids, list):
+                continue
+            self._pth_inst_cache[str(sid)] = {int(x) for x in ids}
+        for sid in missing:
+            self._pth_inst_cache[str(sid)] = None
+        logging.info(
+            "ThreeDReferDataset: loaded instance-id cache from %r (%d with ids, %d missing .pth).",
+            path,
+            len(inst),
+            len(missing),
+        )
+        return True
+
+    def _write_instance_id_cache(self) -> None:
+        path = self._instance_id_cache_path
+        assert path
+        inst_out = {}
+        missing_out = []
+        for sid, u in self._pth_inst_cache.items():
+            if u is None:
+                missing_out.append(sid)
+            else:
+                inst_out[sid] = sorted(u)
+        merged_inst = dict(inst_out)
+        merged_miss = set(missing_out)
+        if osp.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    old = json.load(f)
+                if old.get("format") == self._INSTANCE_CACHE_VERSION:
+                    for sid, ids in (old.get("instance_sets") or {}).items():
+                        if sid not in merged_inst and isinstance(ids, list):
+                            merged_inst[sid] = ids
+                    merged_miss.update(old.get("missing_pth") or [])
+            except Exception as e:
+                logging.warning("ThreeDReferDataset: could not merge existing cache %r: %s", path, e)
+        blob = {
+            "format": self._INSTANCE_CACHE_VERSION,
+            "pts_root": osp.abspath(self.pts_root),
+            "pth_rel_subdir": str(self.pth_rel_subdir),
+            "instance_sets": {k: merged_inst[k] for k in sorted(merged_inst.keys())},
+            "missing_pth": sorted(merged_miss),
+        }
+        d = osp.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(blob, f, indent=0)
+        os.replace(tmp, path)
+        logging.info(
+            "ThreeDReferDataset: wrote instance-id cache to %r (%d scenes with ids, %d missing .pth).",
+            path,
+            len(merged_inst),
+            len(merged_miss),
+        )
 
     @staticmethod
     def _resolve_scene_list_path(path: str) -> str:

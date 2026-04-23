@@ -60,19 +60,39 @@ git add Models/reason3d/update_superpoints.py
 git commit -m "Reason3D: Surprise eval/finetune, dataset filters, checkpoint paths, qualitative saves, cluster docs"
 ```
 
-**Remote:** your repo currently has `origin` → `https://github.com/liziwennba/SURPRISE3D.git`. To push to **your** GitHub repo instead:
+**Remotes:** this clone has `origin` → `https://github.com/liziwennba/SURPRISE3D.git` (treat as **upstream** if you fork).
+
+### Push your work as a **GitHub fork** (recommended flow)
+
+1. On GitHub, open **https://github.com/liziwennba/SURPRISE3D** and click **Fork** (creates `https://github.com/<you>/SURPRISE3D` or similar under your account).  
+   - Alternatively create an **empty** repo and add it as a remote (no fork link in GitHub UI, but you can still push).
+
+2. Locally, keep the original remote for pulling updates, and add **your** fork as the remote you push to:
 
 ```bash
-git remote rename origin upstream   # optional, keep old remote as upstream
-git remote add origin https://github.com/<you>/<your-repo>.git
+cd /path/to/spatial_reasoning
+git remote rename origin upstream
+git remote add origin git@github.com:<you>/SURPRISE3D.git
+# or: https://github.com/<you>/SURPRISE3D.git
+git fetch upstream
 git push -u origin main
 ```
 
-Or add a second remote:
+3. Later, sync from upstream before a PR:
 
 ```bash
-git remote add myfork https://github.com/<you>/<your-repo>.git
-git push -u myfork main
+git fetch upstream
+git merge upstream/main   # or: git rebase upstream/main
+git push origin main
 ```
 
-Use a **personal access token** or SSH if GitHub rejects password auth.
+4. Open a **Pull Request** on `liziwennba/SURPRISE3D` from your fork’s `main` (GitHub will offer this after you push).
+
+**If you prefer not to rename `origin`**, leave it as-is and only add your fork:
+
+```bash
+git remote add fork git@github.com:<you>/SURPRISE3D.git
+git push -u fork main
+```
+
+Use **SSH keys** or a **personal access token** (HTTPS); GitHub no longer accepts account passwords for `git push`.
