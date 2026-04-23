@@ -1,0 +1,5 @@
+# Scenes from Surprise val JSON (/data/annotations/surprise_val.json) for small eval smoke runs.
+# (Previous trial IDs were not in that split — they matched no annotations.)
+09c1414f1b
+0d2ee665be
+13c3e046d7

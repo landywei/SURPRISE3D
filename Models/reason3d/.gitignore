@@ -1,0 +1,10 @@
+# Local training / eval outputs (large; sync separately — see docs/DATA_SYNC.md)
+lavis/output/
+
+# Python bytecode
+**/__pycache__/
+*.py[cod]
+
+# Built CUDA extension (rebuild per machine with scripts/build_pointgroup_ops.sh)
+lavis/models/reason3d_models/lib/pointgroup_ops/*.so
+lavis/models/reason3d_models/lib/build/

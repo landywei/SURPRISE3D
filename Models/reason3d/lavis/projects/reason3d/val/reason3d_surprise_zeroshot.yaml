@@ -1,0 +1,97 @@
+# Zero-shot / checkpoint eval on Surprise3D-style JSON + ScanNet++ .pth.
+# Skips QA rows whose object_id never appears in sampled_instance_anno_id (top100 instance policy).
+#
+# Run (from Models/reason3d, after conda activate and PYTHONPATH=.):
+#   python evaluate.py --cfg-path lavis/projects/reason3d/val/reason3d_surprise_zeroshot.yaml \
+#     --options model.reason3d_checkpoint=/path/to/reason3d_checkpoint.pth
+# (``model.pretrained=/path/to.pth`` still works for backward compatibility.)
+#
+# Override data roots if needed:
+#   --options datasets.3d_refer.build_info.annotations.test.storage=/data/annotations/surprise_val.json \
+#             datasets.3d_refer.build_info.points.storage=/data/scannetpp \
+#             datasets.3d_refer.dataset_init.pth_rel_subdir=processed_trial
+# Default pth_rel_subdir is "processed" (prepare_training_data output), not "scannetpp".
+#
+# Small scene subset: use val/reason3d_surprise_zeroshot_small.yaml or set
+#   datasets.3d_refer.dataset_init.eval_scene_allowlist_file=scripts/trial_scenes.txt
+# Optional row cap: datasets.3d_refer.dataset_init.eval_max_samples=32
+
+model:
+  arch: reason3d_t5
+  model_type: pretrain_flant5xl
+  # Full Reason3D ``checkpoint["model"]`` weights; set via CLI or env script (not SPFormer).
+  reason3d_checkpoint: null
+  use_grad_checkpoint: False
+  mask_embedding: False
+  point_encoder_cfg:
+    input_channel: 6
+    media: 32
+    normalize_before: True
+    return_blocks: True
+    fix_module: ["input_conv", "unet", "output_layer"]
+    pretrained: "/data/checkpoints/spf_scannet_512.pth"
+  mask_decoder_cfg:
+    media: 32
+    num_layer: 6
+    d_model: 256
+    d_text: 512
+    nhead: 8
+    hidden_dim: 1024
+    dropout: 0.0
+    activation_fn: "gelu"
+    attn_mask: True
+  seg_criterion_cfg:
+    loss_weight: [1.0, 1.0, 0.5, 5.0]
+    loss_fun: "focal"
+  pred_confidence: 0.5
+
+datasets:
+  3d_refer:
+    dataset_init:
+      filter_missing_gt_in_pth: true
+      pth_rel_subdir: "processed"
+    text_processor:
+      train:
+        name: "blip_question"
+        prompt: ""
+      eval:
+        name: "blip_question"
+    build_info:
+      annotations:
+        test:
+          storage: /data/annotations/surprise_val.json
+      points:
+        storage: /data/scannetpp
+
+run:
+  task: 3d_refer_seg
+  lr_sched: "linear_warmup_cosine_lr"
+  init_lr: 1e-4
+  min_lr: 1e-5
+  warmup_lr: 1e-8
+  warmup_steps: 1000
+  weight_decay: 0.05
+  max_epoch: 1
+  batch_size_train: 1
+  batch_size_eval: 1
+  num_workers: 2
+  accum_grad_iters: 1
+  max_len: 60
+  min_len: 1
+  num_beams: 5
+  inference_method: "generate"
+  seed: 42
+  output_dir: "output/reason3d_surprise_zeroshot"
+  # Set true to save per-sample masks + JSONL for qualitative analysis (full val can be large).
+  save_eval_predictions: false
+  amp: True
+  evaluate: True
+  train_splits: []
+  valid_splits: []
+  test_splits: ["test"]
+  use_dist_eval_sampler: false
+  device: "cuda"
+  gpu: 0
+  world_size: 1
+  distributed: false
+  dist_url: "env://"

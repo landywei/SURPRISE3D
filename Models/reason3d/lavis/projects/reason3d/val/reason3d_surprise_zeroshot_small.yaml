@@ -1,0 +1,90 @@
+# Same as reason3d_surprise_zeroshot.yaml but only scenes listed in scripts/trial_scenes.txt
+# (and optional eval_max_samples cap). Use for quick smoke eval.
+#
+#   python evaluate.py --cfg-path lavis/projects/reason3d/val/reason3d_surprise_zeroshot_small.yaml \
+#     --options model.reason3d_checkpoint=/path/to/reason3d_checkpoint.pth
+#
+# Inline scenes instead of a file:
+#   --options datasets.3d_refer.dataset_init.eval_scene_ids=[7739004a45,3928249b53]
+# Cap QA rows after scene filter (optional):
+#   --options datasets.3d_refer.dataset_init.eval_max_samples=32
+
+model:
+  arch: reason3d_t5
+  model_type: pretrain_flant5xl
+  reason3d_checkpoint: null
+  use_grad_checkpoint: False
+  mask_embedding: False
+  point_encoder_cfg:
+    input_channel: 6
+    media: 32
+    normalize_before: True
+    return_blocks: True
+    fix_module: ["input_conv", "unet", "output_layer"]
+    pretrained: "/data/checkpoints/spf_scannet_512.pth"
+  mask_decoder_cfg:
+    media: 32
+    num_layer: 6
+    d_model: 256
+    d_text: 512
+    nhead: 8
+    hidden_dim: 1024
+    dropout: 0.0
+    activation_fn: "gelu"
+    attn_mask: True
+  seg_criterion_cfg:
+    loss_weight: [1.0, 1.0, 0.5, 5.0]
+    loss_fun: "focal"
+  pred_confidence: 0.5
+
+datasets:
+  3d_refer:
+    dataset_init:
+      filter_missing_gt_in_pth: true
+      pth_rel_subdir: "processed"
+      eval_scene_allowlist_file: "scripts/trial_scenes.txt"
+    text_processor:
+      train:
+        name: "blip_question"
+        prompt: ""
+      eval:
+        name: "blip_question"
+    build_info:
+      annotations:
+        test:
+          storage: /data/annotations/surprise_val.json
+      points:
+        storage: /data/scannetpp
+
+run:
+  task: 3d_refer_seg
+  lr_sched: "linear_warmup_cosine_lr"
+  init_lr: 1e-4
+  min_lr: 1e-5
+  warmup_lr: 1e-8
+  warmup_steps: 1000
+  weight_decay: 0.05
+  max_epoch: 1
+  batch_size_train: 1
+  batch_size_eval: 1
+  num_workers: 2
+  accum_grad_iters: 1
+  max_len: 60
+  min_len: 1
+  num_beams: 5
+  inference_method: "generate"
+  seed: 42
+  output_dir: "output/reason3d_surprise_zeroshot_small"
+  # When true, writes qualitative/ under the run output_dir (see lavis/tasks/refer_seg_task.py).
+  save_eval_predictions: true
+  amp: True
+  evaluate: True
+  train_splits: []
+  valid_splits: []
+  test_splits: ["test"]
+  use_dist_eval_sampler: false
+  device: "cuda"
+  gpu: 0
+  world_size: 1
+  distributed: false
+  dist_url: "env://"

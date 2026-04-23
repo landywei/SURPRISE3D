@@ -2,7 +2,6 @@ import logging
 import os
 import torch
 import torch.nn as nn
-import ipdb
 import torch.nn.functional as F
 import gorilla
 from torch.cuda.amp import autocast as autocast
@@ -16,6 +15,25 @@ from lavis.models.reason3d_models.mask_decoder import MaskDecoder
 from lavis.models.reason3d_models.point_extractor import PointExtractor
 from lavis.models.reason3d_models.seg_loss import Criterion
 from lavis.common.utils import is_url
+
+
+def _is_missing_cfg_val(val) -> bool:
+    if val is None:
+        return True
+    s = str(val).strip()
+    if not s:
+        return True
+    return s.lower() in ("null", "none", "~")
+
+
+def _normalize_checkpoint_path(url_or_filename):
+    if url_or_filename is None:
+        return None
+    p = str(url_or_filename).strip().strip('"').strip("'")
+    p = os.path.expanduser(p)
+    if not is_url(p) and not os.path.isabs(p):
+        p = os.path.abspath(p)
+    return p
 
 
 @registry.register_model("reason3d_t5")
@@ -53,8 +71,6 @@ class Reason3DT5(BaseModel):
         for layer in self.Qformer.bert.encoder.layer:
             layer.output = None
             layer.intermediate = None
-        if t5_model == 'google/flan-t5-xl':
-            t5_model = '/workspace/huggingface/flan-t5-xl/'
         self.t5_tokenizer = T5TokenizerFast.from_pretrained(t5_model)
 
         num_added_tokens = self.t5_tokenizer.add_tokens("[SEG]")
@@ -92,6 +108,26 @@ class Reason3DT5(BaseModel):
             param.requires_grad = True
         self.criterion = Criterion(**seg_criterion_cfg)
         self.pred_confidence = pred_confidence
+
+    def load_checkpoint_from_config(self, cfg, **kwargs):
+        """
+        Load full Reason3D weights. Prefer ``model.reason3d_checkpoint`` so it is not confused with
+        ``point_encoder_cfg.pretrained`` (SPFormer) or the BLIP2 default ``model.pretrained`` URL from
+        the merged base YAML. Falls back to ``model.pretrained`` when it points to a real file/URL.
+        """
+        if cfg.get("load_finetuned", False):
+            return super().load_checkpoint_from_config(cfg, **kwargs)
+        raw = cfg.get("reason3d_checkpoint", None)
+        if _is_missing_cfg_val(raw):
+            raw = cfg.get("pretrained", None)
+        if _is_missing_cfg_val(raw):
+            raise RuntimeError(
+                "No Reason3D checkpoint configured. Pass e.g. "
+                "`--options model.reason3d_checkpoint=/absolute/path/to/reason3d.pth` "
+                "(recommended; see scripts/run_surprise_zeroshot_eval.sh), or set `model.pretrained` "
+                "to that .pth for backward compatibility. Relative paths are resolved from cwd."
+            )
+        self.load_from_pretrained(raw)
 
     def forward(self, samples):
 
@@ -338,31 +374,44 @@ class Reason3DT5(BaseModel):
 
     @classmethod
     def init_Qformer(cls, num_query_token, vision_width, cross_attention_freq=2):
-        encoder_config = BertConfig.from_pretrained("/workspace/huggingface/bert-base-uncased/")
+        bert_id = "bert-base-uncased"
+        encoder_config = BertConfig.from_pretrained(bert_id)
         encoder_config.encoder_width = vision_width
         # insert cross-attention layer every other block
         encoder_config.add_cross_attention = True
         encoder_config.cross_attention_freq = cross_attention_freq
         encoder_config.query_length = num_query_token
-        Qformer = BertLMHeadModel.from_pretrained("/workspace/huggingface/bert-base-uncased/", config=encoder_config)
+        Qformer = BertLMHeadModel.from_pretrained(bert_id, config=encoder_config)
         query_tokens = nn.Parameter(torch.zeros(1, num_query_token, encoder_config.hidden_size))
         query_tokens.data.normal_(mean=0.0, std=encoder_config.initializer_range)
         return Qformer, query_tokens
 
     def load_from_pretrained(self, url_or_filename):
-        if is_url(url_or_filename):
-            cached_file = download_cached_file(url_or_filename, check_hash=False, progress=True)
+        path = _normalize_checkpoint_path(url_or_filename)
+        if path is None:
+            raise RuntimeError("checkpoint path is empty")
+        if is_url(path):
+            cached_file = download_cached_file(path, check_hash=False, progress=True)
             checkpoint = torch.load(cached_file, map_location="cpu")
-        elif os.path.isfile(url_or_filename):
-            checkpoint = torch.load(url_or_filename, map_location="cpu")
+        elif os.path.isfile(path):
+            checkpoint = torch.load(path, map_location="cpu")
         else:
-            raise RuntimeError("checkpoint url or path is invalid")
+            parent = os.path.dirname(path) or "."
+            hint = ""
+            if os.path.isdir(parent):
+                hint = (
+                    f" Directory {parent!r} exists, but there is no file {os.path.basename(path)!r}."
+                )
+            raise RuntimeError(
+                "checkpoint url or path is invalid: "
+                f"raw={url_or_filename!r} -> resolved={path!r} cwd={os.getcwd()}.{hint}"
+            )
 
         state_dict = checkpoint["model"]
 
         msg = self.load_state_dict(state_dict, strict=False)
 
         # logging.info("Missing keys {}".format(msg.missing_keys))
-        logging.info("load checkpoint from %s" % url_or_filename)
+        logging.info("load checkpoint from %s" % path)
 
         return msg

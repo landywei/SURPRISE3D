@@ -5,6 +5,7 @@
  For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
 """
 
+import logging
 import os
 import json
 import torch
@@ -15,19 +16,34 @@ import math
 from PIL import Image
 from PIL import ImageFile
 import torch_scatter
-from typing import Dict, Sequence, Tuple, Union
+from typing import Dict, Optional, Sequence, Set, Tuple, Union
 import tracemalloc
 from lavis.datasets.datasets.base_dataset import BaseDataset
 import glob
 import random
 
 class ThreeDReferDataset(BaseDataset):
-    def __init__(self, text_processor, pts_root, ann_paths,question_type):
+    def __init__(
+        self,
+        text_processor,
+        pts_root,
+        ann_paths,
+        question_type=None,
+        filter_missing_gt_in_pth=False,
+        pth_rel_subdir="scannetpp",
+        eval_scene_ids=None,
+        eval_scene_allowlist_file=None,
+        eval_max_samples=None,
+    ):
         """
         vis_root (string): Root directory of images (e.g. coco/images/)
         ann_root (string): directory to store the annotation file
         """
-        super().__init__(text_processor, pts_root, ann_paths,question_type)
+        super().__init__(text_processor, pts_root, ann_paths)
+        self.pth_rel_subdir = pth_rel_subdir
+        self.eval_max_samples = eval_max_samples
+        self._eval_scene_set: Optional[Set[str]] = None
+        self._pth_inst_cache: Dict[str, Optional[Set[int]]] = {}
         self.scene_ids = {}
         n = 0
         self.use_xyz = True
@@ -52,17 +68,165 @@ class ThreeDReferDataset(BaseDataset):
 
         self.question_type = question_type
         self.annotation = new_annotation
+        if filter_missing_gt_in_pth:
+            uniq_scenes = {a.get("scene_id") for a in self.annotation if a.get("scene_id") is not None}
+            logging.info(
+                "ThreeDReferDataset: filter_missing_gt_in_pth will torch.load up to %d unique scene .pth "
+                "files under %s (subdir=%s). One full read per scene to cache instance ids; on full train "
+                "or slow/network storage this often takes several minutes and runs only once at init.",
+                len(uniq_scenes),
+                self.pts_root,
+                self.pth_rel_subdir,
+            )
+            before = len(self.annotation)
+            self.annotation = [a for a in self.annotation if self._ann_has_target_in_pth(a)]
+            logging.info(
+                "ThreeDReferDataset: filter_missing_gt_in_pth kept %d / %d annotations (pts_root=%s, subdir=%s)",
+                len(self.annotation),
+                before,
+                pts_root,
+                pth_rel_subdir,
+            )
+            if len(self.annotation) == 0:
+                raise RuntimeError(
+                    "All annotations were filtered out (no object_id in sampled_instance_anno_id). "
+                    "Check pth paths and dataset_init.pth_rel_subdir."
+                )
+
+        scene_allow = self._build_eval_scene_allowlist(eval_scene_ids, eval_scene_allowlist_file)
+        if scene_allow:
+            before_sc = len(self.annotation)
+            ann_scenes = {a.get("scene_id") for a in self.annotation if a.get("scene_id") is not None}
+            overlap = ann_scenes & scene_allow
+            if not overlap:
+                sample_ann = sorted(ann_scenes)[:12]
+                sample_allow = sorted(scene_allow)[:12]
+                raise RuntimeError(
+                    "eval scene allowlist has no overlap with annotation scene_ids "
+                    f"(allowlist n={len(scene_allow)}, ann scenes n={len(ann_scenes)}). "
+                    f"Example ann scene_id: {sample_ann}. Example allowlist: {sample_allow}. "
+                    "Use scene_id values from your val JSON (see scripts/trial_scenes.txt)."
+                )
+            self.annotation = [a for a in self.annotation if a.get("scene_id") in scene_allow]
+            self._eval_scene_set = scene_allow
+            logging.info(
+                "ThreeDReferDataset: eval scene allowlist kept %d / %d annotations (%d scenes)",
+                len(self.annotation),
+                before_sc,
+                len(scene_allow),
+            )
+            if len(self.annotation) == 0:
+                raise RuntimeError(
+                    "All annotations removed by eval_scene_ids / eval_scene_allowlist_file. "
+                    "Check scene ids and that val JSON contains those scenes."
+                )
+
+        if self.eval_max_samples is not None and int(self.eval_max_samples) > 0:
+            cap = int(self.eval_max_samples)
+            if len(self.annotation) > cap:
+                logging.info(
+                    "ThreeDReferDataset: eval_max_samples=%d truncating %d -> %d",
+                    cap,
+                    len(self.annotation),
+                    cap,
+                )
+                self.annotation = self.annotation[:cap]
+
         self.sp_filenames = self.get_sp_filenames()
         self.short_question_list = QUESTION_LIST
         self.answer_list = ANSWER_LIST
         self.with_elastic = False
         self.aug = True      
         self.data_cache = {}
+
+    def _instance_ids_in_pth(self, scene_id: str) -> Optional[Set[int]]:
+        if scene_id in self._pth_inst_cache:
+            return self._pth_inst_cache[scene_id]
+        pth = osp.join(self.pts_root, self.pth_rel_subdir, f"{scene_id}.pth")
+        if not osp.isfile(pth):
+            self._pth_inst_cache[scene_id] = None
+            return None
+        try:
+            d = torch.load(pth, map_location="cpu", weights_only=False)
+        except TypeError:
+            d = torch.load(pth, map_location="cpu")
+        inst = np.asarray(d["sampled_instance_anno_id"]).astype(np.int64).reshape(-1)
+        u = {int(x) for x in np.unique(inst).tolist() if int(x) != -100}
+        self._pth_inst_cache[scene_id] = u
+        return u
+
+    def _ann_has_target_in_pth(self, ann) -> bool:
+        u = self._instance_ids_in_pth(ann["scene_id"])
+        if u is None:
+            return True
+        oid = ann["object_id"]
+        ids = [int(x) for x in oid] if isinstance(oid, list) else [int(oid)]
+        return any(i in u for i in ids)
+
+    @staticmethod
+    def _resolve_scene_list_path(path: str) -> str:
+        if osp.isfile(path):
+            return osp.abspath(path)
+        try:
+            from lavis.common.registry import registry
+
+            repo = registry.get_path("repo_root")
+            candidate = osp.normpath(osp.join(repo, path))
+            if osp.isfile(candidate):
+                return candidate
+        except Exception:
+            pass
+        candidate2 = osp.normpath(osp.join(os.getcwd(), path))
+        if osp.isfile(candidate2):
+            return candidate2
+        return path
+
+    def _build_eval_scene_allowlist(
+        self,
+        eval_scene_ids: Optional[Union[Sequence[str], str]],
+        eval_scene_allowlist_file: Optional[str],
+    ) -> Optional[Set[str]]:
+        ids: Set[str] = set()
+        if eval_scene_ids is not None:
+            if isinstance(eval_scene_ids, str):
+                for part in eval_scene_ids.replace(",", " ").split():
+                    part = part.strip()
+                    if part:
+                        ids.add(part)
+            else:
+                for x in eval_scene_ids:
+                    if x is not None and str(x).strip():
+                        ids.add(str(x).strip())
+        if eval_scene_allowlist_file:
+            fp = self._resolve_scene_list_path(str(eval_scene_allowlist_file).strip())
+            if not osp.isfile(fp):
+                raise FileNotFoundError(
+                    f"eval_scene_allowlist_file not found: {eval_scene_allowlist_file} (resolved: {fp})"
+                )
+            with open(fp, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#"):
+                        continue
+                    ids.add(s.split()[0])
+        return ids if ids else None
+
     def get_sp_filenames(self):
-        #print(self.pts_root)
-        filenames = glob.glob(osp.join(self.pts_root, 'scannetpp', '*' + '.pth'))
-        assert len(filenames) > 0, 'Empty dataset.'
+        filenames = glob.glob(osp.join(self.pts_root, self.pth_rel_subdir, "*" + ".pth"))
+        assert len(filenames) > 0, "Empty dataset."
         filenames = sorted(filenames)
+        if self._eval_scene_set:
+            base = osp.join(self.pts_root, self.pth_rel_subdir)
+            keep = {
+                osp.join(base, f"{sid}.pth")
+                for sid in self._eval_scene_set
+                if osp.isfile(osp.join(base, f"{sid}.pth"))
+            }
+            filenames = sorted(keep)
+            assert len(filenames) > 0, (
+                "Empty dataset after eval scene allowlist: no matching .pth under "
+                f"{base}. Check scene ids and pth_rel_subdir."
+            )
         return filenames
         
     def load(self, filename):
@@ -184,10 +348,7 @@ class ThreeDReferDataset(BaseDataset):
         gt_spmask = (gt_spmask > 0.5).float()
         gt_pmask = ref_lbl.float()
         return gt_pmask, gt_spmask
-    
-    def __len__(self):
-        return len(self.scanrefer)
-    
+
     def __getitem__(self, index: int) -> Tuple:
         data = self.annotation[index]
         scan_id = data["scene_id"]
@@ -240,7 +401,11 @@ class ThreeDReferDataset(BaseDataset):
         #     print(np.unique(inst))
         #     exit()
 
-        assert gt_pmask.int().max() == 1
+        assert gt_pmask.int().max() == 1, (
+            f"No GT foreground for scene_id={scan_id!r} object_id={object_id!r} "
+            f"(ann_id={ann_id!r}); target missing from sampled_instance_anno_id in {sp_filename!r}. "
+            "Set datasets.3d_refer.dataset_init.filter_missing_gt_in_pth: true and check pth_rel_subdir."
+        )
         return {
             'ann_ids': ann_id,
             'scan_ids': scan_id,

@@ -199,10 +199,20 @@ class BaseDatasetBuilder:
 
             # create datasets
             dataset_cls = self.train_dataset_cls if is_train else self.eval_dataset_cls
+            dataset_init = self.config.get("dataset_init", None)
+            if dataset_init is not None and OmegaConf.is_config(dataset_init):
+                init_kwargs = OmegaConf.to_container(dataset_init, resolve=True)
+            elif isinstance(dataset_init, dict):
+                init_kwargs = dict(dataset_init)
+            else:
+                init_kwargs = {}
+            if not isinstance(init_kwargs, dict):
+                init_kwargs = {}
             datasets[split] = dataset_cls(
                 text_processor=text_processor,
                 ann_paths=ann_paths,
                 pts_root=pts_path,
+                **init_kwargs,
             )
 
         return datasets

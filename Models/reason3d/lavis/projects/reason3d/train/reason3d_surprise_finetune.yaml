@@ -1,0 +1,94 @@
+# Finetune Reason3D on Surprise-style 3D referring (train JSON + ScanNet++ .pth).
+#
+# From Models/reason3d (after conda activate, PYTHONPATH=., pointgroup_ops built):
+#   REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune.sh
+#
+# Override data roots or hyperparameters, e.g.:
+#   REASON3D_TRAIN_OPTIONS="run.max_epoch=5 run.batch_size_train=2 datasets.3d_refer.dataset_init.pth_rel_subdir=processed_trial"
+# If you see AssertionError on gt_pmask in __getitem__, keep filter_missing_gt_in_pth: true (default here).
+#
+# Resume an LAVIS training run (runner checkpoint), not the same as REASON3D_INIT_CKPT:
+#   REASON3D_RESUME_CKPT=/path/to/output/ckpt_epoch_10.pth bash scripts/run_surprise_finetune.sh
+
+model:
+  arch: reason3d_t5
+  model_type: pretrain_flant5xl
+  # Set by run_surprise_finetune.sh via --options (starting Reason3D weights).
+  reason3d_checkpoint: null
+  use_grad_checkpoint: False
+  mask_embedding: False
+  point_encoder_cfg:
+    input_channel: 6
+    media: 32
+    normalize_before: True
+    return_blocks: True
+    fix_module: ["input_conv", "unet", "output_layer"]
+    pretrained: "/data/checkpoints/spf_scannet_512.pth"
+  mask_decoder_cfg:
+    media: 32
+    num_layer: 6
+    d_model: 256
+    d_text: 512
+    nhead: 8
+    hidden_dim: 1024
+    dropout: 0.0
+    activation_fn: "gelu"
+    attn_mask: True
+  seg_criterion_cfg:
+    loss_weight: [1.0, 1.0, 0.5, 5.0]
+    loss_fun: "focal"
+  pred_confidence: 0.5
+
+datasets:
+  3d_refer:
+    dataset_init:
+      pth_rel_subdir: "processed"
+      # Same as eval: drop rows whose object_id never appears in sampled_instance_anno_id (top100 / labeling),
+      # otherwise __getitem__ asserts on an empty GT mask.
+      filter_missing_gt_in_pth: true
+    text_processor:
+      train:
+        name: "blip_question"
+        prompt: ""
+      eval:
+        name: "blip_question"
+    build_info:
+      annotations:
+        train:
+          storage: /data/annotations/surprise_train.json
+        val:
+          storage: /data/annotations/surprise_val.json
+        test:
+          storage: /data/annotations/surprise_val.json
+      points:
+        storage: /data/scannetpp
+
+run:
+  task: 3d_refer_seg
+  lr_sched: "linear_warmup_cosine_lr"
+  init_lr: 1e-4
+  min_lr: 1e-5
+  warmup_lr: 1e-8
+  warmup_steps: 1000
+  weight_decay: 0.05
+  max_epoch: 20
+  batch_size_train: 2
+  batch_size_eval: 1
+  num_workers: 4
+  accum_grad_iters: 1
+  max_len: 60
+  min_len: 1
+  num_beams: 5
+  inference_method: "generate"
+  seed: 42
+  output_dir: "output/reason3d_surprise_finetune"
+  amp: True
+  evaluate: False
+  train_splits: ["train"]
+  valid_splits: ["val"]
+  test_splits: []
+  device: "cuda"
+  gpu: 0
+  world_size: 1
+  distributed: false
+  dist_url: "env://"

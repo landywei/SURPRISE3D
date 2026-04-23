@@ -1,5 +1,6 @@
 from setuptools import find_packages, setup
 
+import os
 import os.path as osp
 import torch
 from glob import glob
@@ -24,11 +25,13 @@ def get_include_dir(module):
 
 def make_extension(name, module):
     if not torch.cuda.is_available(): return
+    extra = os.environ.get("POINTGROUP_CUDA_INCLUDE_DIRS", "")
+    extra_includes = [p for p in extra.split(os.pathsep) if p]
     extersion = CUDAExtension
     return extersion(
         name='.'.join([module, name]),
         sources=get_sources(module),
-        include_dirs=get_include_dir(module),
+        include_dirs=get_include_dir(module) + extra_includes,
         extra_compile_args={
             'cxx': ['-g'],
             'nvcc': [
