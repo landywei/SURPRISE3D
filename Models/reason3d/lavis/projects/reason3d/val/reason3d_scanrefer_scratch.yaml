@@ -11,7 +11,7 @@ model:
     normalize_before: True
     return_blocks: True
     fix_module: ['input_conv', 'unet', 'output_layer']
-    pretrained: "/data/checkpoints/spf_scannet_512.pth"
+    pretrained: "/nfs-stor/lan.wei/data/checkpoints/spf_scannet_512.pth"
   mask_decoder_cfg:
     media: 32
     num_layer: 6

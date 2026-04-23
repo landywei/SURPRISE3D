@@ -2,7 +2,7 @@
 # Trial: few scenes → processed_trial/, merge superpoints, slice JSON, verify.
 set -euo pipefail
 
-SCNNETPP="${SCNNETPP:-/data/scannetpp}"
+SCNNETPP="${SCNNETPP:-/nfs-stor/lan.wei/data/scannetpp}"
 TOOLS="${SCNNETPP_TOOLS:-/home/ubuntu/scannetpp_tools}"
 REASON3D="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(cd "$REASON3D/../.." && pwd)"
@@ -33,15 +33,15 @@ echo "[2/5] merge superpoints (reuse UniDet outputs under unidet3d_prep)"
   --only_scenes "$IDS_CSV" \
   --force )
 
-echo "[3/5] trial annotations → /data/annotations/surprise_trial_train.json"
+echo "[3/5] trial annotations → /nfs-stor/lan.wei/data/annotations/surprise_trial_train.json"
 python3 <<PY
 import json, os
 scenes = {s.strip() for s in open("$TRIAL_LIST") if s.strip()}
-with open("/data/annotations/surprise_train.json") as f:
+with open("/nfs-stor/lan.wei/data/annotations/surprise_train.json") as f:
     rows = json.load(f)
 out = [r for r in rows if r.get("scene_id") in scenes]
-os.makedirs("/data/annotations", exist_ok=True)
-with open("/data/annotations/surprise_trial_train.json", "w") as f:
+os.makedirs("/nfs-stor/lan.wei/data/annotations", exist_ok=True)
+with open("/nfs-stor/lan.wei/data/annotations/surprise_trial_train.json", "w") as f:
     json.dump(out, f)
 print("wrote", len(out), "rows")
 PY
@@ -49,7 +49,7 @@ PY
 echo "[4/5] verify (aggregate + per-scene)"
 python3 "$REASON3D/scripts/verify_surprise3d_instance_ids.py" \
   --scannetpp-root "$SCNNETPP" \
-  --train-json /data/annotations/surprise_trial_train.json \
+  --train-json /nfs-stor/lan.wei/data/annotations/surprise_trial_train.json \
   --pth-subdir processed_trial \
   --sample 10 --seed 0
 
@@ -58,7 +58,7 @@ while IFS= read -r s; do
   echo "--- $s ---"
   python3 "$REASON3D/scripts/verify_surprise3d_instance_ids.py" \
     --scannetpp-root "$SCNNETPP" \
-    --train-json /data/annotations/surprise_trial_train.json \
+    --train-json /nfs-stor/lan.wei/data/annotations/surprise_trial_train.json \
     --pth-subdir processed_trial \
     --scene "$s"
 done < "$TRIAL_LIST"

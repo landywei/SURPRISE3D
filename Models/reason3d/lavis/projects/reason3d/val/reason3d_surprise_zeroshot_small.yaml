@@ -21,7 +21,7 @@ model:
     normalize_before: True
     return_blocks: True
     fix_module: ["input_conv", "unet", "output_layer"]
-    pretrained: "/data/checkpoints/spf_scannet_512.pth"
+    pretrained: "/nfs-stor/lan.wei/data/checkpoints/spf_scannet_512.pth"
   mask_decoder_cfg:
     media: 32
     num_layer: 6
@@ -52,9 +52,9 @@ datasets:
     build_info:
       annotations:
         test:
-          storage: /data/annotations/surprise_val.json
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_val.json
       points:
-        storage: /data/scannetpp
+        storage: /nfs-stor/lan.wei/data/scannetpp
 
 run:
   task: 3d_refer_seg

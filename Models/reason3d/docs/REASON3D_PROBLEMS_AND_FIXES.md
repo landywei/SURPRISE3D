@@ -35,7 +35,7 @@ Several pipeline stages interact:
   - Removes the **assert** on empty GT during training.  
   - Avoids evaluating QA rows with **no supervisable / no checkable** mask.
 
-- **`pth_rel_subdir`** must match where `.pth` files actually live (e.g. **`processed`** under `/data/scannetpp/processed/`, not a wrong sibling folder). Wrong subdir → glob finds nothing or wrong files → “empty dataset” or inconsistent filtering.
+- **`pth_rel_subdir`** must match where `.pth` files actually live (e.g. **`processed`** under `/nfs-stor/lan.wei/data/scannetpp/processed/`, not a wrong sibling folder). Wrong subdir → glob finds nothing or wrong files → “empty dataset” or inconsistent filtering.
 
 - **Clearer assert message** in `threedrefer_datasets.py` when a row slips through without GT, pointing at **`filter_missing_gt_in_pth`** and **`pth_rel_subdir`**.
 
@@ -54,11 +54,11 @@ Treat **JSON `object_id`** and **`.pth` instance ids** as **two views of the wor
 
 ### Fixes
 
-- **`scripts/build_pointgroup_ops.sh`**: sanitize bad **`CUDA_HOME`**, add conda **`targets/.../include`** to include paths, align **nvcc major** with **`torch.version.cuda`**, document **`REASON3D_CUDA_HOME`** for a full CUDA 11.8 toolkit when conda headers are not enough.
-- **`lib/setup.py`**: optional **`POINTGROUP_CUDA_INCLUDE_DIRS`** for extra include dirs.
+- **`scripts/build_pointgroup_ops.sh`**: sanitize bad **`CUDA_HOME`**, add conda **`targets/.../include`** to include paths, align **nvcc major** with **`torch.version.cuda`**, document **`REASON3D_CUDA_HOME`** for a full CUDA **12.x** toolkit when conda headers are not enough.
+- **`lib/setup.py`**: optional **`POINTGROUP_CUDA_INCLUDE_DIRS`** for extra include dirs; when **`CONDA_PREFIX`** is set, default system includes prefer the **conda sysroot** `.../x86_64-conda-*/sysroot/usr/include` instead of bare **`/usr/include`**, so conda’s `nvcc` + host compiler are not mixed with a mismatched glibc (avoids e.g. **`bits/timesize.h: No such file or directory`**).
 - **`scripts/reinstall_pointgroup_ops.sh`**: clean reinstall loop.
 
-**Rule of thumb:** PyTorch **cu118** wheel → use **CUDA 11.8–compatible** nvcc and headers; mixing **CUDA 12** toolchains with **cu118** PyTorch is a common footgun.
+**Rule of thumb:** PyTorch **cu121** wheel → use **CUDA 12–compatible** nvcc and headers; mixing a **CUDA 11** `nvcc` with **cu121** PyTorch (or the reverse) is a common footgun.
 
 ---
 
@@ -86,7 +86,7 @@ Errors loading **`point_encoder_cfg.pretrained`** — wrong path or file that is
 
 ### Fix
 
-Point **`point_encoder_cfg.pretrained`** at the real **SPFormer / UNET** weight file (in our runs **`/data/checkpoints/spf_scannet_512.pth`**), distinct from the **full Reason3D** `.pth`.
+Point **`point_encoder_cfg.pretrained`** at the real **SPFormer / UNET** weight file (in our runs **`/nfs-stor/lan.wei/data/checkpoints/spf_scannet_512.pth`**), distinct from the **full Reason3D** `.pth`.
 
 ---
 

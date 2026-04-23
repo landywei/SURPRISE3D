@@ -98,8 +98,8 @@ def main() -> int:
     )
     p.add_argument(
         "--scannetpp_root",
-        default=os.environ.get("SCNNETPP", "/data/scannetpp"),
-        help="ScanNet++ root with data/<scene>/scans/mesh_aligned_0.05.ply (default: $SCNNETPP or /data/scannetpp)",
+        default=os.environ.get("SCNNETPP", "/nfs-stor/lan.wei/data/scannetpp"),
+        help="ScanNet++ root with data/<scene>/scans/mesh_aligned_0.05.ply (default: $SCNNETPP or /nfs-stor/lan.wei/data/scannetpp)",
     )
     p.add_argument(
         "--only_scenes",

@@ -1,6 +1,35 @@
+# PyTorch: use CUDA 12.1 wheels (cu121); nvcc for pointgroup_ops should match torch.version.cuda major (12.x). See docs/ENVIRONMENT.md.
+# First-time install (conda env active, with network): bash scripts/install_reason3d_deps.sh
+#   (conda: NVIDIA cuda-toolkit 12.1.1 label, conda-forge::sparsehash for pointgroup_ops headers, then this file via pip)
+# On a machine with internet:
+#   pip install -r requirements.txt --index-url https://download.pytorch.org/whl/cu121
+# Or use --extra-index-url for cu121 and PyPI for the rest:
+#   pip install --extra-index-url https://download.pytorch.org/whl/cu121 -r requirements.txt
+#
+# setuptools>=82 removed pkg_resources; PyTorch 2.1 cpp_extension still needs it.
+setuptools>=64,<82
+numpy<2
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
+# PyTorch 2.1.2 (Linux x86_64) typically pulls triton 2.1.0; newer torch needs a newer triton with triton.backends.*.
+triton==2.1.0; platform_system == "Linux" and platform_machine == "x86_64"
+# Sparse conv (backbone.py, point_extractor): `import spconv.pytorch`. Wheel must match CUDA major (cu121).
+spconv-cu121>=2.3.0; platform_system == "Linux" and platform_machine == "x86_64"
+# requests → charset_normalizer; mixed/partial upgrades cause ImportError: _FREQUENCIES_SET (cd.py vs constant.py).
+requests>=2.28,<3
+charset-normalizer>=3.2,<4
 gorilla-core
 open3d
 opencv-python
 plyfile
 tqdm
+# LAVIS core imports (not covered by the small fork list alone)
+webdataset>=0.2.0
+omegaconf>=2.3.0
+iopath>=0.1.9
+decord
+timm
 transformers==4.33.2
+# torch-scatter: required by lavis (point_extractor, threedrefer datasets). Installed in
+# scripts/install_reason3d_deps.sh from PyG wheels (-f https://data.pyg.org/whl/torch-2.1.2+cu121.html).

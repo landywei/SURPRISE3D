@@ -1,3 +1,7 @@
+# Vendored Google sparsehash (scripts/prep_google_sparsehash_headers.sh; large tarball extract)
+third_party/
+.tmp_prep_sparsehash_*/
+
 # Local training / eval outputs (large; sync separately — see docs/DATA_SYNC.md)
 lavis/output/
 

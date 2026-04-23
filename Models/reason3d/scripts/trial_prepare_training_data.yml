@@ -1,10 +1,10 @@
-# Few-scene trial → /data/scannetpp/processed_trial/
+# Few-scene trial → /nfs-stor/lan.wei/data/scannetpp/processed_trial/
 # Adjust paths if your roots differ.
 data:
-  data_root: /data/scannetpp/data
-  labels_path: /data/scannetpp/metadata/semantic_benchmark/top100.txt
+  data_root: /nfs-stor/lan.wei/data/scannetpp/data
+  labels_path: /nfs-stor/lan.wei/data/scannetpp/metadata/semantic_benchmark/top100.txt
   use_instances: true
-  instance_labels_path: /data/scannetpp/metadata/semantic_benchmark/top100_instance.txt
+  instance_labels_path: /nfs-stor/lan.wei/data/scannetpp/metadata/semantic_benchmark/top100_instance.txt
   mapping_file: /home/ubuntu/scannetpp_tools/semantic/configs/map_benchmark_with_counts.csv
   list_path: /home/ubuntu/spatial_reasoning/Models/reason3d/scripts/trial_scenes.txt
   ignore_label: -100
@@ -14,4 +14,4 @@ data:
     - map_label_to_index
     - get_labels_on_vertices
     - sample_points_on_mesh
-out_dir: /data/scannetpp/processed_trial
+out_dir: /nfs-stor/lan.wei/data/scannetpp/processed_trial

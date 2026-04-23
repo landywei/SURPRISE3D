@@ -2,11 +2,18 @@
 # Finetune Reason3D on Surprise train JSON + ScanNet++ processed .pth (see train/reason3d_surprise_finetune.yaml).
 # Requires pointgroup_ops (scripts/build_pointgroup_ops.sh) and a starting Reason3D checkpoint.
 #
-# Single GPU (default):
-#   REASON3D_INIT_CKPT=/data/checkpoints/reason3d.pth bash scripts/run_surprise_finetune.sh
+# Instance-id cache (fast dataset init after first pass): see datasets.3d_refer.dataset_init in the YAML.
+#   First run on a cluster: set instance_id_cache_write: true (or override once):
+#     REASON3D_TRAIN_OPTIONS="datasets.3d_refer.dataset_init.instance_id_cache_write=true" ...
+#   Later runs: instance_id_cache_write: false (default) reuses instance_id_cache_file JSON.
+# Optional filtered QA dump: write_filtered_annotations_to in dataset_init (rank 0 only).
 #
-# Multi-GPU on one node (torchrun); world size is taken from the launcher:
-#   NPROC=4 REASON3D_INIT_CKPT=/data/checkpoints/reason3d.pth bash scripts/run_surprise_finetune.sh
+# Single GPU (default):
+#   REASON3D_INIT_CKPT=/nfs-stor/lan.wei/data/checkpoints/reason3d.pth bash scripts/run_surprise_finetune.sh
+#
+# Multi-GPU on one node (torchrun); Slurm must allocate the same GPU count, e.g. --gres=gpu:4:
+#   NPROC=4 REASON3D_INIT_CKPT=/nfs-stor/lan.wei/data/checkpoints/reason3d.pth bash scripts/run_surprise_finetune.sh
+# (NPROC>1 forces run.distributed=true; effective batch ≈ batch_size_train * NPROC * accum_grad_iters.)
 #
 # Optional runner resume (training state from output_dir):
 #   REASON3D_RESUME_CKPT=/path/to/ckpt_epoch_5.pth ...
@@ -27,7 +34,7 @@ fi
 
 if [[ -z "$INIT_CKPT" ]]; then
   echo "Set REASON3D_INIT_CKPT to the Reason3D .pth to finetune from (weights with checkpoint[\"model\"])." >&2
-  echo "Example: REASON3D_INIT_CKPT=/data/checkpoints/reason3d.pth bash $0" >&2
+  echo "Example: REASON3D_INIT_CKPT=/nfs-stor/lan.wei/data/checkpoints/reason3d.pth bash $0" >&2
   exit 1
 fi
 if [[ ! -f "$INIT_CKPT" ]]; then
@@ -51,9 +58,15 @@ if [[ -n "${REASON3D_TRAIN_OPTIONS:-}" ]]; then
 fi
 
 NPROC="${NPROC:-1}"
+# reason3d_surprise_finetune.yaml sets run.distributed: false for single-GPU; torchrun alone is not enough.
+if [[ "$NPROC" -gt 1 ]]; then
+  OPTS+=( "run.distributed=true" )
+fi
 
-eval "$(conda shell.bash hook)"
-conda activate reason3d310 2>/dev/null || conda activate reason3d 2>/dev/null || true
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "${_LIB_DIR}/conda_init_reason3d.sh"
+unset _LIB_DIR
 
 if [[ "$NPROC" -gt 1 ]]; then
   exec torchrun --nproc_per_node="$NPROC" train.py --cfg-path "$CFG" --options "${OPTS[@]}"

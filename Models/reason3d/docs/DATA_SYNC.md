@@ -1,23 +1,23 @@
 # Data and artifacts sync (new GPU cluster)
 
-Paths below match the **default YAMLs** in this fork (`/data/...`). Adjust source/destination if your old cluster used different mounts.
+Paths below match the **default YAMLs** in this fork (`/nfs-stor/lan.wei/data/...`). Adjust source/destination if your hosts use different mounts.
 
 ## 1. What the code expects on the new machine
 
 | Role | Typical path | Notes |
 |------|----------------|------|
-| ScanNet++ root + prepared `.pth` | `/data/scannetpp` | Includes `processed/` (or `processed_trial/`) with `<scene_id>.pth` used by `pth_rel_subdir` |
-| SPFormer backbone | `/data/checkpoints/spf_scannet_512.pth` | `point_encoder_cfg.pretrained` |
+| ScanNet++ root + prepared `.pth` | `/nfs-stor/lan.wei/data/scannetpp` | Includes `processed/` (or `processed_trial/`) with `<scene_id>.pth` used by `pth_rel_subdir` |
+| SPFormer backbone | `/nfs-stor/lan.wei/data/checkpoints/spf_scannet_512.pth` | `point_encoder_cfg.pretrained` |
 | Full Reason3D weights | your choice | Passed as `REASON3D_CKPT` / `REASON3D_INIT_CKPT` → `model.reason3d_checkpoint` |
-| Surprise annotations | `/data/annotations/surprise_train.json`, `surprise_val.json` | YAML `build_info.annotations` |
+| Surprise annotations | `/nfs-stor/lan.wei/data/annotations/surprise_train.json`, `surprise_val.json` | YAML `build_info.annotations` |
 | Optional: ScanNet++ tools / maps | under `scannetpp` | e.g. `benchmark_file_lists`, `data/` meshes — only if you re-run preprocessing |
 
-### What **training** (`train.py` / `ThreeDReferDataset`) actually reads under `/data/scannetpp`
+### What **training** (`train.py` / `ThreeDReferDataset`) actually reads under `/nfs-stor/lan.wei/data/scannetpp`
 
-With the default Surprise finetune config (`build_info.points.storage: /data/scannetpp` and `dataset_init.pth_rel_subdir: processed`), the dataloader **only** touches:
+With the default Surprise finetune config (`build_info.points.storage: /nfs-stor/lan.wei/data/scannetpp` and `dataset_init.pth_rel_subdir: processed`), the dataloader **only** touches:
 
 ```text
-/data/scannetpp/processed/<scene_id>.pth
+/nfs-stor/lan.wei/data/scannetpp/processed/<scene_id>.pth
 ```
 
 one file per scene that appears in your train/val JSON (and, with `filter_missing_gt_in_pth`, each unique scene is loaded once at init to build the instance-id cache). Keys used from each `.pth` include at least: `sampled_coords`, `sampled_colors`, `superpoints`, `sampled_labels`, `sampled_instance_anno_id` (and related tensors the collater expects).
@@ -27,7 +27,8 @@ one file per scene that appears in your train/val JSON (and, with `filter_missin
 **Sync first (minimal):**
 
 ```bash
-rsync -avh --progress OLD:/data/scannetpp/processed/ NEW:/data/scannetpp/processed/
+# Replace OLD:/<path>/ with the source host’s ScanNet++ root (e.g. OLD:/data/scannetpp/).
+rsync -avh --progress OLD:<path-on-source>/scannetpp/processed/ NEW:/nfs-stor/lan.wei/data/scannetpp/processed/
 ```
 
 If you use **`pth_rel_subdir: processed_trial`** (or another folder name), sync **that** directory instead.
@@ -36,25 +37,25 @@ If you use **`pth_rel_subdir: processed_trial`** (or another folder name), sync 
 
 **Instance-id cache (optional, small JSON):** if you use `dataset_init.instance_id_cache_file` under `processed/` (see `reason3d_surprise_finetune.yaml`), **rsync that file too** so the new cluster skips the long “filter” `torch.load` pass on first job.
 
-**Hugging Face model cache** (not under `/data` by default): first run downloads **FLAN-T5-XL**, **BERT**, etc. Either:
+**Hugging Face model cache** (separate from the dataset paths above; usually under `~/.cache/huggingface` or `HF_HOME`): first run downloads **FLAN-T5-XL**, **BERT**, etc. Either:
 
 - Rsync `~/.cache/huggingface/` (or your `HF_HOME`) from the old cluster, or  
 - Let the new cluster download once and keep a **shared** `HF_HOME` on fast storage.
 
 ## 2. Large directories to rsync
 
-Run from a machine that can **SSH** to both hosts (replace `OLD`, `NEW`, user, paths).
+Run from a machine that can **SSH** to both hosts (replace `OLD`, `NEW`, user, and each path). The **destination** in this repo defaults to `/nfs-stor/lan.wei/data/...`; the **source** may still be something like `/data/...` on an older machine.
 
 ### ScanNet++ tree (large)
 
 ```bash
-rsync -avh --progress OLD:/data/scannetpp/ NEW:/data/scannetpp/
+rsync -avh --progress OLD:<path-on-source>/scannetpp/ NEW:/nfs-stor/lan.wei/data/scannetpp/
 ```
 
 If you only need **processed** point clouds for Reason3D:
 
 ```bash
-rsync -avh --progress OLD:/data/scannetpp/processed/ NEW:/data/scannetpp/processed/
+rsync -avh --progress OLD:<path-on-source>/scannetpp/processed/ NEW:/nfs-stor/lan.wei/data/scannetpp/processed/
 ```
 
 Add other subdirs (`data/`, `semantic/`, …) only if preprocessing or `update_superpoints.py` needs them.
@@ -62,7 +63,7 @@ Add other subdirs (`data/`, `semantic/`, …) only if preprocessing or `update_s
 ### Checkpoints (small–medium)
 
 ```bash
-rsync -avh --progress OLD:/data/checkpoints/ NEW:/data/checkpoints/
+rsync -avh --progress OLD:<path-on-source>/checkpoints/ NEW:/nfs-stor/lan.wei/data/checkpoints/
 ```
 
 Include at least:
@@ -73,7 +74,7 @@ Include at least:
 ### Annotations
 
 ```bash
-rsync -avh --progress OLD:/data/annotations/ NEW:/data/annotations/
+rsync -avh --progress OLD:<path-on-source>/annotations/ NEW:/nfs-stor/lan.wei/data/annotations/
 ```
 
 Minimum: `surprise_train.json`, `surprise_val.json` (and any trial JSONs you use).
@@ -116,9 +117,9 @@ If you use `pth_rel_subdir: processed_trial` or custom annotation paths, sync th
 
 ```bash
 # Spot-check counts
-ls /data/scannetpp/processed/*.pth | wc -l
-ls -la /data/checkpoints/
-ls -la /data/annotations/surprise*.json
+ls /nfs-stor/lan.wei/data/scannetpp/processed/*.pth | wc -l
+ls -la /nfs-stor/lan.wei/data/checkpoints/
+ls -la /nfs-stor/lan.wei/data/annotations/surprise*.json
 ```
 
 Then run `scripts/run_surprise_zeroshot_eval_small.sh` with `REASON3D_CKPT` pointing at the synced Reason3D checkpoint.

@@ -12,7 +12,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument(
         "--src",
-        default="/data/scannetpp/metadata/semantic_benchmark/map_benchmark.csv",
+        default="/nfs-stor/lan.wei/data/scannetpp/metadata/semantic_benchmark/map_benchmark.csv",
         help="Official ScanNet++ map_benchmark.csv",
     )
     p.add_argument(

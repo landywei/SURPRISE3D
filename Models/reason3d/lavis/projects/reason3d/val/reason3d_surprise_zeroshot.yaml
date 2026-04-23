@@ -7,8 +7,8 @@
 # (``model.pretrained=/path/to.pth`` still works for backward compatibility.)
 #
 # Override data roots if needed:
-#   --options datasets.3d_refer.build_info.annotations.test.storage=/data/annotations/surprise_val.json \
-#             datasets.3d_refer.build_info.points.storage=/data/scannetpp \
+#   --options datasets.3d_refer.build_info.annotations.test.storage=/nfs-stor/lan.wei/data/annotations/surprise_val.json \
+#             datasets.3d_refer.build_info.points.storage=/nfs-stor/lan.wei/data/scannetpp \
 #             datasets.3d_refer.dataset_init.pth_rel_subdir=processed_trial
 # Default pth_rel_subdir is "processed" (prepare_training_data output), not "scannetpp".
 #
@@ -29,7 +29,7 @@ model:
     normalize_before: True
     return_blocks: True
     fix_module: ["input_conv", "unet", "output_layer"]
-    pretrained: "/data/checkpoints/spf_scannet_512.pth"
+    pretrained: "/nfs-stor/lan.wei/data/checkpoints/spf_scannet_512.pth"
   mask_decoder_cfg:
     media: 32
     num_layer: 6
@@ -59,9 +59,9 @@ datasets:
     build_info:
       annotations:
         test:
-          storage: /data/annotations/surprise_val.json
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_val.json
       points:
-        storage: /data/scannetpp
+        storage: /nfs-stor/lan.wei/data/scannetpp
 
 run:
   task: 3d_refer_seg

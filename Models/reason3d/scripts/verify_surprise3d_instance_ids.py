@@ -127,8 +127,8 @@ def aggregate_sample(
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--scannetpp-root", default="/data/scannetpp")
-    p.add_argument("--train-json", default="/data/annotations/surprise_train.json")
+    p.add_argument("--scannetpp-root", default="/nfs-stor/lan.wei/data/scannetpp")
+    p.add_argument("--train-json", default="/nfs-stor/lan.wei/data/annotations/surprise_train.json")
     p.add_argument("--pth-subdir", default="processed")
     p.add_argument("--scene", default="")
     p.add_argument("--sample", type=int, default=0)

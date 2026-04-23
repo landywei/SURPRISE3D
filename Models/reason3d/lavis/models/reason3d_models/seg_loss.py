@@ -7,6 +7,22 @@ from torch.nn.utils.rnn import pad_sequence
 from typing import Union
 
 
+def _pred_masks_scores_for_loss(pred_masks: torch.Tensor, pred_scores: torch.Tensor):
+    """
+    Mask decoder returns [B, 1, M] and scores [B, 1, 1]. Plain .squeeze() removes the batch
+    dimension when B==1 (common per-rank in DDP), breaking BCE vs pad_sequence targets [B, M].
+    """
+    if pred_masks.dim() == 3 and pred_masks.shape[1] == 1:
+        pred_masks = pred_masks.squeeze(1)
+    if pred_scores.dim() == 3:
+        pred_scores = pred_scores.squeeze(-1)
+        if pred_scores.dim() == 2 and pred_scores.shape[1] == 1:
+            pred_scores = pred_scores.squeeze(1)
+    elif pred_scores.dim() == 2 and pred_scores.shape[-1] == 1:
+        pred_scores = pred_scores.squeeze(-1)
+    return pred_masks, pred_scores
+
+
 def get_iou(inputs: torch.Tensor, targets: torch.Tensor, pad_mask: Union[torch.Tensor, None]=None, pred_confidence=0.5):
     '''
     padding modified
@@ -205,8 +221,9 @@ class Criterion(nn.Module):
     def get_layer_loss(self, layer, aux_outputs, pad_masks, gt_spmasks):
         loss_out = {}
 
-        pred_scores = aux_outputs['scores'].squeeze()
-        pred_masks = aux_outputs['masks'].squeeze()
+        pred_masks, pred_scores = _pred_masks_scores_for_loss(
+            aux_outputs["masks"], aux_outputs["scores"]
+        )
         tgt_padding = pad_sequence(gt_spmasks, batch_first=True)
 
         # score loss
@@ -239,10 +256,9 @@ class Criterion(nn.Module):
     
         loss_out = {}
 
-        pred_scores = pred['scores'].squeeze()
-        pred_masks = pred['masks'].squeeze()
+        pred_masks, pred_scores = _pred_masks_scores_for_loss(pred["masks"], pred["scores"])
 
-        pad_masks = ~pred['batch_mask'].squeeze()
+        pad_masks = ~pred["batch_mask"]
         tgt_padding = pad_sequence(gt_spmasks, batch_first=True)
         # score loss
         with torch.no_grad():

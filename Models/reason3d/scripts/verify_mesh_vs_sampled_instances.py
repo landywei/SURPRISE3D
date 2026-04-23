@@ -7,7 +7,7 @@ Proves "missing in JSON vs pth" is usually sampling coverage, not wrong ids.
 
 Example:
   python scripts/verify_mesh_vs_sampled_instances.py --scene 7739004a45 \\
-    --scannetpp-root /data/scannetpp --pth-subdir processed_trial
+    --scannetpp-root /nfs-stor/lan.wei/data/scannetpp --pth-subdir processed_trial
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def mesh_vertex_instance_ids(scannetpp_root: str, scene: str) -> np.ndarray:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--scene", required=True)
-    p.add_argument("--scannetpp-root", default="/data/scannetpp")
+    p.add_argument("--scannetpp-root", default="/nfs-stor/lan.wei/data/scannetpp")
     p.add_argument("--pth-subdir", default="processed_trial")
     args = p.parse_args()
 

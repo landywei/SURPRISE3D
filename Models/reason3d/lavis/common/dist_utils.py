@@ -55,6 +55,15 @@ def is_main_process():
 
 
 def init_distributed_mode(args):
+    # YAML often sets distributed: false for single-GPU eval, but Slurm / wrappers may still export
+    # RANK/WORLD_SIZE — honor explicit false and skip torch.distributed (avoids missing MASTER_ADDR).
+    if getattr(args, "distributed", None) is False:
+        print("Not using distributed mode (run_cfg.distributed is False)")
+        args.distributed = False
+        if torch.cuda.is_available():
+            torch.cuda.set_device(int(getattr(args, "gpu", 0)))
+        return
+
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ["WORLD_SIZE"])
@@ -68,6 +77,13 @@ def init_distributed_mode(args):
         return
 
     args.distributed = True
+
+    # Single-process env:// jobs (WORLD_SIZE=1) often omit MASTER_*; localhost is enough for NCCL init.
+    if args.world_size == 1:
+        if not os.environ.get("MASTER_ADDR"):
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+        if not os.environ.get("MASTER_PORT"):
+            os.environ["MASTER_PORT"] = "29500"
 
     torch.cuda.set_device(args.gpu)
     args.dist_backend = "nccl"

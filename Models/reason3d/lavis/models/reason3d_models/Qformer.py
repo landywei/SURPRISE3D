@@ -22,9 +22,10 @@ from torch.nn import CrossEntropyLoss
 import torch.nn.functional as F
 
 from transformers.activations import ACT2FN
-from transformers.file_utils import (
-    ModelOutput,
-)
+try:
+    from transformers.file_utils import ModelOutput  # transformers<4.40
+except ImportError:
+    from transformers.utils.generic import ModelOutput
 from transformers.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPoolingAndCrossAttentions,

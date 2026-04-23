@@ -4,24 +4,49 @@
 # Typical failures:
 #   - cuda_runtime_api.h: PyTorch guessed CUDA_HOME=$CONDA_PREFIX but headers live under
 #     $CONDA_PREFIX/targets/x86_64-linux/include → we set CUDA_INC_PATH + CPATH.
-#   - CUDA 12.x vs PyTorch cu118 (11.8): unset stale CUDA_HOME so conda's nvcc 11.8 is used,
-#     or install CUDA 11.8 toolkit and set REASON3D_CUDA_HOME=/usr/local/cuda-11.8
+#   - Wrong CUDA toolkit on PATH vs PyTorch (cu121): unset stale CUDA_HOME or set
+#     REASON3D_CUDA_HOME to a full CUDA 12.x install whose nvcc major matches torch.version.cuda.
 #
-# Optional: REASON3D_CUDA_HOME=/usr/local/cuda-11.8 (must match torch.version.cuda major)
+# Optional: REASON3D_CUDA_HOME=/usr/local/cuda-12.6 (must match torch.version.cuda major, e.g. 12)
+# Conda in non-login / srun shells: scripts/conda_init_reason3d.sh sources conda.sh; override with
+#   REASON3D_CONDA_SH=/path/to/miniconda3/etc/profile.d/conda.sh
+# Optional: REASON_PYTHON=/path/to/python with torch (default: $CONDA_PREFIX/bin/python when present)
 set -euo pipefail
 
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "${_LIB_DIR}/conda_init_reason3d.sh"
+unset _LIB_DIR
+
+# Prefer env Python (has torch); bare `python` may be system/miniconda base without torch.
+if [[ -n "${REASON_PYTHON:-}" && -x "${REASON_PYTHON}" ]]; then
+  REASON_PY="${REASON_PYTHON}"
+elif [[ -n "${CONDA_PREFIX:-}" && -x "${CONDA_PREFIX}/bin/python" ]]; then
+  REASON_PY="${CONDA_PREFIX}/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  REASON_PY=python3
+else
+  REASON_PY=python
+fi
+if ! "$REASON_PY" -c "import torch" 2>/dev/null; then
+  echo "ERROR: PyTorch not found in: $REASON_PY" >&2
+  echo "  Activate the conda env that has torch (e.g. conda activate reason3d310), then re-run." >&2
+  exit 1
+fi
+
+REASON3D_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lavis/models/reason3d_models/lib" && pwd)"
 echo "Building in: $LIB"
 
-if command -v apt-get >/dev/null 2>&1; then
-  sudo apt-get update -qq
-  sudo apt-get install -y libsparsehash-dev
+# Vendored headers from scripts/prep_google_sparsehash_headers.sh (avoids conda when env is broken).
+_VEND_SH="${REASON3D_ROOT}/third_party/sparsehash-upstream-2.0.4/src"
+if [[ -f "${_VEND_SH}/google/dense_hash_map" && -z "${POINTGROUP_SPARSEHASH_ROOT:-}" ]]; then
+  export POINTGROUP_SPARSEHASH_ROOT="${_VEND_SH}"
+  echo "Using Google sparsehash headers: POINTGROUP_SPARSEHASH_ROOT=$POINTGROUP_SPARSEHASH_ROOT"
 fi
+unset _VEND_SH
 
-eval "$(conda shell.bash hook)"
-conda activate reason3d310 2>/dev/null || conda activate reason3d 2>/dev/null || true
-
-# Drop broken CUDA roots (empty /usr/local/cuda-11.8 tree, old profile exports, etc.)
+# Drop broken CUDA roots (empty /usr/local/cuda-12.* tree, old profile exports, etc.)
 if [[ -n "${REASON3D_CUDA_HOME:-}" && ! -x "${REASON3D_CUDA_HOME}/bin/nvcc" ]]; then
   echo "WARN: REASON3D_CUDA_HOME=${REASON3D_CUDA_HOME} has no executable bin/nvcc — unsetting." >&2
   unset REASON3D_CUDA_HOME
@@ -32,7 +57,7 @@ if [[ -n "${CUDA_HOME:-}" && ! -x "${CUDA_HOME}/bin/nvcc" ]]; then
 fi
 
 torch_cuda_maj() {
-  python - <<'PY'
+  "$REASON_PY" - <<'PY'
 import re
 import torch
 v = torch.version.cuda or ""
@@ -47,10 +72,17 @@ nvcc_maj() {
   echo "${o:-0}"
 }
 
-# Prefer a side-by-side CUDA 11.8 toolkit (matches typical PyTorch cu118 wheels).
-if [[ -z "${REASON3D_CUDA_HOME:-}" && -x /usr/local/cuda-11.8/bin/nvcc ]]; then
-  export REASON3D_CUDA_HOME="/usr/local/cuda-11.8"
-  echo "Auto-selected REASON3D_CUDA_HOME=$REASON3D_CUDA_HOME"
+# Prefer a side-by-side CUDA 12.x toolkit (matches PyTorch cu121 wheels; pick newest present).
+if [[ -z "${REASON3D_CUDA_HOME:-}" ]]; then
+  for _cand in /usr/local/cuda-12.6 /usr/local/cuda-12.5 /usr/local/cuda-12.4 /usr/local/cuda-12.3 \
+               /usr/local/cuda-12.2 /usr/local/cuda-12.1 /usr/local/cuda-12 /usr/local/cuda; do
+    if [[ -x "${_cand}/bin/nvcc" ]]; then
+      export REASON3D_CUDA_HOME="$_cand"
+      echo "Auto-selected REASON3D_CUDA_HOME=$REASON3D_CUDA_HOME"
+      break
+    fi
+  done
+  unset _cand
 fi
 
 # User override: full NVIDIA toolkit matching PyTorch CUDA (recommended for reliable builds).
@@ -61,7 +93,7 @@ if [[ -n "${REASON3D_CUDA_HOME:-}" ]]; then
   echo "Using REASON3D_CUDA_HOME=$CUDA_HOME"
 else
   # Prefer conda's nvcc on PATH; drop CUDA_HOME/CUDA_PATH so PyTorch infers from `which nvcc`
-  # (avoids CUDA_HOME=/usr/local/cuda 12.x with PyTorch 11.8).
+  # (avoids CUDA_HOME pointing at a toolkit whose major mismatches torch.version.cuda).
   if [[ -n "${CONDA_PREFIX:-}" && -x "${CONDA_PREFIX}/bin/nvcc" ]]; then
     export PATH="${CONDA_PREFIX}/bin:${PATH}"
     unset CUDA_HOME CUDA_PATH || true
@@ -87,12 +119,12 @@ if [[ -n "${CONDA_PREFIX:-}" ]]; then
     export LIBRARY_PATH="${TGT_LIB}${LIBRARY_PATH:+:$LIBRARY_PATH}"
     export LD_LIBRARY_PATH="${TGT_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     echo "Conda CUDA includes: $TGT_INC"
-    echo "Note: if the build then fails on thrust/complex.h, install NVIDIA CUDA Toolkit 11.8" >&2
-    echo "  (matching PyTorch cu118) and run with REASON3D_CUDA_HOME=/usr/local/cuda-11.8" >&2
+    echo "Note: if the build then fails on thrust/complex.h, install a full NVIDIA CUDA 12.x toolkit" >&2
+    echo "  matching torch.version.cuda and run with REASON3D_CUDA_HOME=/usr/local/cuda-12.x" >&2
   fi
 fi
 
 cd "$LIB"
-pip install -e . --no-build-isolation
+"$REASON_PY" -m pip install -e . --no-build-isolation
 
-python -c "import pointgroup_ops; print('pointgroup_ops OK')"
+"$REASON_PY" -c "import pointgroup_ops; print('pointgroup_ops OK')"
