@@ -6,6 +6,7 @@
 """
 
 import argparse
+import os
 import random
 
 import numpy as np
@@ -65,7 +66,9 @@ def main():
     # os.environ["NCCL_BLOCKING_WAIT"] = "1"
 
     # set before init_distributed_mode() to ensure the same job_id shared across all ranks.
-    job_id = now()
+    # For eval resume (same qualitative/ dir), reuse the interrupted run's folder name, e.g.:
+    #   REASON3D_EVAL_JOB_ID=20260423192 REASON3D_EVAL_RESUME=1 bash scripts/run_surprise_zeroshot_eval_small.sh
+    job_id = os.environ.get("REASON3D_EVAL_JOB_ID", "").strip() or now()
 
     cfg = Config(parse_args())
 

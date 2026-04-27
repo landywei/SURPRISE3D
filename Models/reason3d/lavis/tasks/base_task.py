@@ -70,6 +70,10 @@ class BaseTask:
     def before_evaluation(self, model, dataset, **kwargs):
         model.before_evaluation(dataset=dataset, task_type=type(self))
 
+    def prepare_eval_dataset_resume(self, dataset, split_name):
+        """Hook before eval dataloaders are built; override for eval checkpoint/resume."""
+        return
+
     def after_evaluation(self, **kwargs):
         pass
 

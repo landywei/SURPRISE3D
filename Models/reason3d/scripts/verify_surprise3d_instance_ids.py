@@ -52,7 +52,7 @@ def json_id_union(train_json: str, scene: str) -> set[int]:
 
 
 def report_scene(
-    scannetpp_root: str, train_json: str, scene: str, pth_subdir: str = "processed"
+    scannetpp_root: str, train_json: str, scene: str, pth_subdir: str = "processed_surprise_full_pth"
 ) -> int:
     seg = seg_group_ids(scannetpp_root, scene)
     pth = os.path.join(scannetpp_root, pth_subdir, f"{scene}.pth")
@@ -80,7 +80,7 @@ def report_scene(
 
 
 def aggregate_sample(
-    scannetpp_root: str, train_json: str, n: int, seed: int, pth_subdir: str = "processed"
+    scannetpp_root: str, train_json: str, n: int, seed: int, pth_subdir: str = "processed_surprise_full_pth"
 ) -> int:
     with open(train_json) as f:
         rows = json.load(f)
@@ -129,7 +129,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scannetpp-root", default="/nfs-stor/lan.wei/data/scannetpp")
     p.add_argument("--train-json", default="/nfs-stor/lan.wei/data/annotations/surprise_train.json")
-    p.add_argument("--pth-subdir", default="processed")
+    p.add_argument("--pth-subdir", default="processed_surprise_full_pth")
     p.add_argument("--scene", default="")
     p.add_argument("--sample", type=int, default=0)
     p.add_argument("--seed", type=int, default=0)

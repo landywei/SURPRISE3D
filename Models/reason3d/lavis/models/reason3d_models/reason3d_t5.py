@@ -219,6 +219,63 @@ class Reason3DT5(BaseModel):
             loss = loss + seg_loss
             return {"loss": loss}
 
+    def _seg_out_from_t5_greedy_then_teacher(
+        self,
+        inputs_embeds: torch.Tensor,
+        encoder_atts: torch.Tensor,
+        num_beams: int,
+        max_len: int,
+        min_len: int,
+        length_penalty: float,
+        repetition_penalty: float,
+        output_device: torch.device,
+        no_repeat_ngram_size: int = 0,
+    ):
+        """
+        Greedy decode (num_beams=1 in our callers) without per-step ``output_hidden_states`` in ``generate()``
+        (huge memory), then one teacher-forced forward to read ``decoder_hidden_states`` like in ``forward()``
+        (same ``labels``-based [SEG] indexing as training; numerics match greedy unrolling).
+        Encoder runs once; ``generate`` and the second call reuse ``encoder_outputs``.
+        """
+        enc_out = self.t5_model.get_encoder()(
+            inputs_embeds=inputs_embeds,
+            attention_mask=encoder_atts,
+            return_dict=True,
+        )
+        gen_kwargs = dict(
+            encoder_outputs=enc_out,
+            attention_mask=encoder_atts,
+            do_sample=False,
+            num_beams=num_beams,
+            max_new_tokens=max_len,
+            min_length=min_len,
+            length_penalty=length_penalty,
+            repetition_penalty=repetition_penalty,
+            return_dict_in_generate=True,
+            output_hidden_states=False,
+        )
+        if no_repeat_ngram_size and int(no_repeat_ngram_size) > 0:
+            gen_kwargs["no_repeat_ngram_size"] = int(no_repeat_ngram_size)
+        gen = self.t5_model.generate(**gen_kwargs)
+        gen_seq = gen.sequences
+        with torch.inference_mode():
+            t5_out = self.t5_model(
+                encoder_outputs=enc_out,
+                attention_mask=encoder_atts,
+                labels=gen_seq,
+                return_dict=True,
+                output_hidden_states=True,
+                use_cache=False,
+            )
+        # Same indexing as training ``forward`` (``targets == seg_token`` on label ids).
+        seq_h = t5_out.decoder_hidden_states[-1]
+        seg_index = gen_seq == self.seg_token_idx
+        picked = seq_h[seg_index]
+        hdim = int(self.t5_model.config.hidden_size)
+        if picked.numel() == 0:
+            return torch.zeros((1, hdim), device=output_device, dtype=seq_h.dtype), gen_seq[0].detach()
+        return picked.float().mean(dim=0, keepdim=True), gen_seq[0].detach()
+
     def predict_seg(
         self,
         samples,
@@ -231,6 +288,7 @@ class Reason3DT5(BaseModel):
         prompt="",
         length_penalty=-1,
         repetition_penalty=1.0,
+        no_repeat_ngram_size: int = 0,
         **kwargs,
     ):
 
@@ -267,36 +325,28 @@ class Reason3DT5(BaseModel):
 
         encoder_atts = torch.cat([atts_t5, input_tokens.attention_mask], dim=1)
         num_beams = 1
-        device_type = "cuda" if "cuda" in str(self.device) else "cpu"
         with torch.cuda.amp.autocast(enabled=(self.device != torch.device("cpu")), dtype=torch.float32):
             inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids)
             inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1)
-            
-            outputs = self.t5_model.generate(
+
+            seg_out, gen_ids = self._seg_out_from_t5_greedy_then_teacher(
                 inputs_embeds=inputs_embeds,
-                attention_mask=encoder_atts,
-                do_sample=False,
+                encoder_atts=encoder_atts,
                 num_beams=num_beams,
-                max_new_tokens=max_len,
-                min_length=min_len,
+                max_len=max_len,
+                min_len=min_len,
                 length_penalty=length_penalty,
                 repetition_penalty=repetition_penalty,
-                return_dict_in_generate=True,
-                output_hidden_states=True
-                # for description, also use repetition penalty = 1.5
+                output_device=pc_embeds.device,
+                no_repeat_ngram_size=no_repeat_ngram_size,
             )
-
-            seg_mask = outputs["sequences"][:,1:] == self.seg_token_idx
-            seg_out = outputs['decoder_hidden_states'][-1][-1]
-            seg_out = seg_out[seg_mask].mean(axis=0, keepdim=True)
-            
-            if seg_out.shape[0] == 0:   
-                #only allow batch size = 1
-                seg_out = torch.zeros((1,self.t5_model.config.hidden_size)).cuda()
 
             text_features = self.text_hidden_fcs[0](seg_out).unsqueeze(1)
             samples["text_features"] = text_features
             result = self.mask_decoder(**samples)
+            result["decoded_text"] = self.t5_tokenizer.decode(
+                gen_ids.tolist(), skip_special_tokens=True
+            )
 
             return result
 

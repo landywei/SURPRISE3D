@@ -1,4 +1,7 @@
 # Finetune Reason3D on Surprise-style 3D referring (train JSON + ScanNet++ .pth).
+# v2: validation skipped during training (valid_splits: []) to reduce wall time.
+#     Output goes to output/reason3d_surprise_finetune_v2 (separate from v1 logs).
+#     Uses fixed blip_processors.py (decimal points preserved in abs-distance queries).
 #
 # From Models/reason3d (after conda activate, PYTHONPATH=., pointgroup_ops built):
 #   REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune.sh
@@ -88,11 +91,11 @@ run:
   num_beams: 5
   inference_method: "generate"
   seed: 42
-  output_dir: "output/reason3d_surprise_finetune"
+  output_dir: "output/reason3d_surprise_finetune_v2"
   amp: True
   evaluate: False
   train_splits: ["train"]
-  valid_splits: ["val"]
+  valid_splits: []
   test_splits: []
   device: "cuda"
   gpu: 0

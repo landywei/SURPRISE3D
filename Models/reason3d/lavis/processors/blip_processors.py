@@ -87,10 +87,12 @@ class BlipQuestionProcessor(BaseProcessor):
 
     def pre_question(self, question):
         question = re.sub(
-            r"([.!\"()*#:;~])",
+            r"([!\"()*#:;~])",
             "",
             question.lower(),
         )
+        # Remove periods only when NOT between two digits (preserve decimal points like 2.24)
+        question = re.sub(r"(?<!\d)\.(?!\d)", "", question)
         question = question.rstrip(" ")
 
         # truncate question

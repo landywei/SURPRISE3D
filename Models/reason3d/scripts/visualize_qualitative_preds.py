@@ -10,10 +10,13 @@ Each .npz contains float16 arrays pred_pmask, gt_pmask with one value per point,
 in the same order as the eval dataloader after ThreeDReferDataset.load +
 transform_test (see lavis/datasets/datasets/threedrefer_datasets.py).
 
-Important: mask files are keyed only by (scene_id, ann_id). If several JSONL rows
-share the same mask_npz path, the file reflects the last write during eval, not
-every text query. Use JSONL for per-prompt metrics; use NPZ for geometry for that
-final (scene, ann) pair.
+Mask files are named ``<scene_id>_<ann_id>_<eval_save_index>.npz`` (see
+``lavis/tasks/refer_seg_task.py``). Each JSONL line lists the matching ``mask_npz``
+and ``eval_save_index`` so GT/pred align with that row's ``text_input`` / ``object_id``.
+
+Viewers: open ``*_gt.ply`` / ``*_pred.ply`` (not ``*_rgb.ply``) and enable vertex /
+point colors (e.g. CloudCompare: ``Edit > Colors > Set unique`` from RGB fields;
+Windows 3D Viewer often ignores PLY vertex colors).
 
 Examples:
   python scripts/visualize_qualitative_preds.py --qual-dir lavis/output/.../qualitative \\
@@ -98,23 +101,45 @@ def scene_pth_path(pts_root: str, pth_rel_subdir: str, scene_id: str) -> str:
     return os.path.join(pts_root, pth_rel_subdir, f"{scene_id}.pth")
 
 
+def pred_for_display(pred: np.ndarray, mode: str) -> np.ndarray:
+    """
+    ``auto`` matches the eval saver in refer_seg_task.py: apply sigmoid only when
+    ``max > 1`` or ``min < 0`` (otherwise values are stored as-is, often already in
+    ``[0, 1]``). Use ``--pred-display sigmoid`` if you know logits were saved in a
+    narrow band inside ``[0, 1]`` without that condition being met.
+    """
+    p = np.asarray(pred, dtype=np.float64).reshape(-1)
+    if mode == "raw":
+        return p
+    if mode == "sigmoid":
+        return 1.0 / (1.0 + np.exp(-np.clip(p, -60.0, 60.0)))
+    if p.size and (float(p.max()) > 1.0 or float(p.min()) < 0.0):
+        return 1.0 / (1.0 + np.exp(-np.clip(p, -60.0, 60.0)))
+    return np.clip(p, 0.0, 1.0)
+
+
 def build_overlay_colors(
     rgb_unit: np.ndarray,
     gt: np.ndarray,
     pred: np.ndarray,
     pred_threshold: float,
+    background_scale: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Returns (colors_gt_highlight, colors_pred_highlight) each [N,3].
-    Base color is rgb_unit; gt paints red, pred paints green (binary).
+
+    Foreground uses pure highlight colors. Non-foreground uses ``rgb_unit * background_scale``
+    so sparse GT (often ~0.1–2% of points) stays visible in MeshLab / CloudCompare; otherwise
+    red can disappear against busy RGB textures at full scale.
     """
-    base = rgb_unit.copy()
-    gt_m = gt >= 0.5
-    pr_m = pred >= pred_threshold
-    c_gt = base.copy()
-    c_gt[gt_m] = np.array([1.0, 0.2, 0.2], dtype=np.float32)
-    c_pr = base.copy()
-    c_pr[pr_m] = np.array([0.2, 1.0, 0.2], dtype=np.float32)
+    base = np.clip(rgb_unit.astype(np.float32, copy=False), 0.0, 1.0)
+    dim = np.clip(base * float(background_scale), 0.0, 1.0)
+    gt_m = np.asarray(gt, dtype=np.float64).reshape(-1) >= 0.5
+    pr_m = np.asarray(pred, dtype=np.float64).reshape(-1) >= float(pred_threshold)
+    c_gt = dim.copy()
+    c_gt[gt_m] = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    c_pr = dim.copy()
+    c_pr[pr_m] = np.array([0.0, 1.0, 0.0], dtype=np.float32)
     return c_gt, c_pr
 
 
@@ -218,6 +243,8 @@ def cmd_export(
     pred_threshold: float,
     heatmap_pred: bool,
     stride: int,
+    pred_display: str,
+    background_scale: float,
     verbose: bool = True,
 ) -> None:
     if row_index < 0 or row_index >= len(rows):
@@ -233,8 +260,9 @@ def cmd_export(
         raise SystemExit(f"Mask npz not found: {mask_path}")
 
     z = np.load(mask_path)
-    pred = np.asarray(z["pred_pmask"], dtype=np.float32).reshape(-1)
+    pred_raw = np.asarray(z["pred_pmask"], dtype=np.float32).reshape(-1)
     gt = np.asarray(z["gt_pmask"], dtype=np.float32).reshape(-1)
+    pred = pred_for_display(pred_raw, pred_display).astype(np.float32)
 
     geo = load_scene_geometry(pth)
     if stride > 1:
@@ -252,15 +280,30 @@ def cmd_export(
     os.makedirs(out_dir, exist_ok=True)
     base = os.path.join(out_dir, f"{scene_id}_row{row_index}")
 
+    gt_frac = float((gt >= 0.5).mean()) if gt.size else 0.0
+    pr_frac = float((pred >= pred_threshold).mean()) if pred.size else 0.0
+    print(
+        f"Mask stats (row {row_index}): GT {100.0 * gt_frac:.4f}% | "
+        f"pred>={pred_threshold} {100.0 * pr_frac:.4f}% | pred_display={pred_display!r}",
+        file=sys.stderr,
+    )
+
     write_ply(geo.xyz_middle, geo.rgb_unit, base + "_rgb.ply")
-    c_gt, c_pr = build_overlay_colors(geo.rgb_unit, gt, pred, pred_threshold)
+    c_gt, c_pr = build_overlay_colors(
+        geo.rgb_unit, gt, pred, pred_threshold, background_scale=background_scale
+    )
     write_ply(geo.xyz_middle, c_gt, base + "_gt.ply")
     write_ply(geo.xyz_middle, c_pr, base + "_pred.ply")
     if heatmap_pred:
-        write_ply(geo.xyz_middle, build_confidence_colors(geo.rgb_unit, pred), base + "_pred_heat.ply")
+        write_ply(
+            geo.xyz_middle,
+            build_confidence_colors(geo.rgb_unit, pred),
+            base + "_pred_heat.ply",
+        )
 
     meta = {
         "row_index": row_index,
+        "eval_save_index": row.get("eval_save_index"),
         "scene_id": scene_id,
         "ann_id": row.get("ann_id"),
         "object_id": row.get("object_id"),
@@ -272,6 +315,10 @@ def cmd_export(
         "pred_threshold": pred_threshold,
         "stride": stride,
         "points_written": int(geo.xyz_middle.shape[0]),
+        "gt_foreground_fraction": gt_frac,
+        "pred_positive_fraction": pr_frac,
+        "pred_display": pred_display,
+        "overlay_background_scale": background_scale,
     }
     with open(base + "_meta.json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
@@ -300,6 +347,8 @@ def cmd_export_all(
     pred_threshold: float,
     heatmap_pred: bool,
     stride: int,
+    pred_display: str,
+    background_scale: float,
 ) -> None:
     n = len(rows)
     if n >= 8 and stride == 1:
@@ -320,6 +369,8 @@ def cmd_export_all(
             pred_threshold=pred_threshold,
             heatmap_pred=heatmap_pred,
             stride=stride,
+            pred_display=pred_display,
+            background_scale=background_scale,
             verbose=False,
         )
     print(f"Done. Outputs under {os.path.abspath(out_dir)}", flush=True)
@@ -396,6 +447,21 @@ def main() -> None:
         help="Keep every k-th point for lighter PLYs (default 1 = full resolution).",
     )
     p.add_argument(
+        "--pred-display",
+        type=str,
+        choices=("auto", "raw", "sigmoid"),
+        default="auto",
+        help="How to interpret pred_pmask in npz before thresholding (see refer_seg_task save heuristic).",
+    )
+    p.add_argument(
+        "--overlay-background-scale",
+        type=float,
+        default=0.35,
+        metavar="S",
+        help="For *_gt.ply / *_pred.ply, multiply non-highlighted RGB by S (0–1). Lower = stronger contrast. "
+        "Use 1.0 to restore old behavior (highlight on full RGB).",
+    )
+    p.add_argument(
         "--plot-iou-hist",
         type=str,
         default=None,
@@ -426,6 +492,10 @@ def main() -> None:
             raise SystemExit("Set --pts-root or REASON3D_PTS_ROOT to the ScanNet++/surprise points root.")
         st = max(1, int(args.stride))
         out_abs = os.path.abspath(args.out_dir)
+        bg = float(args.overlay_background_scale)
+        if not (0.0 <= bg <= 1.0):
+            raise SystemExit("--overlay-background-scale must be between 0 and 1")
+        pdisp = str(args.pred_display)
         if args.export_all:
             cmd_export_all(
                 rows,
@@ -436,6 +506,8 @@ def main() -> None:
                 pred_threshold=args.pred_threshold,
                 heatmap_pred=args.heatmap_pred,
                 stride=st,
+                pred_display=pdisp,
+                background_scale=bg,
             )
         else:
             cmd_export(
@@ -448,6 +520,8 @@ def main() -> None:
                 pred_threshold=args.pred_threshold,
                 heatmap_pred=args.heatmap_pred,
                 stride=st,
+                pred_display=pdisp,
+                background_scale=bg,
                 verbose=True,
             )
 

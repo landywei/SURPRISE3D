@@ -47,7 +47,7 @@ python setup.py develop
 
 ### ScanNet++ Dataset
 
-Download the [ScanNet++] (https://github.com/scannetpp/scannetpp) dataset.
+Download the [ScanNet++](https://github.com/scannetpp/scannetpp) dataset.
 
 Put the downloaded scenes as follows.
 ```
@@ -60,7 +60,7 @@ datasets
 ├── splits
 ```
 
-Follow [ScanNet++] (https://github.com/scannetpp/scannetpp) to Prepare 3D Semantics Training Data, you have to modify the semantic/configs/prepare_training_data.yml. To ensure all categories are included, replace the original instance_class.txt file with the one we provide:
+Follow [ScanNet++](https://github.com/scannetpp/scannetpp) to Prepare 3D Semantics Training Data, you have to modify the semantic/configs/prepare_training_data.yml. To ensure all categories are included, replace the original instance_class.txt file with the one we provide:
 ```
 cd /your_path_to_scannetpp/scannetpp
 python -m semantic.prep.prepare_training_data semantic/configs/prepare_training_data.yml
@@ -80,7 +80,7 @@ datasets
 │   ├── 0a7cc12c0e.pth
 │   ├── ...
 ```
-Follow [UniDet3D] (https://github.com/filaPro/unidet3d/) to generate superpoints. You can also use other methods to generate superpoint on your own.
+Follow [UniDet3D](https://github.com/filaPro/unidet3d/) to generate superpoints. You can also use other methods to generate superpoint on your own.
 ```
 cd /your_path_to_UniDet3D/UniDet3D/data/scannetpp
 python preprocess_raw_data.py --path_to_data path_to_dataset --output_dir path_to_save_preprocessed_raw_data
@@ -92,7 +92,7 @@ python update_superpoints.py --pth_dir datasets/data/processed --scene_dir path_
 ```
 ### Surprise3D dataset
 
-Download [Surprise3D]https://huggingface.co/datasets/hhllzz/surprise-3d annotations.
+Download [Surprise3D](https://huggingface.co/datasets/hhllzz/surprise-3d) annotations.
 
 ```
 datasets
@@ -109,19 +109,38 @@ mv ${Download_PATH}/sp_unet_backbone.pth checkpoints/
 You can also pretrain the backbone by yourself and modify the path [here](lavis/projects/reason3d/train/reason3d_scanrefer_scratch.yaml#L15).
 
 ## Training
-- **3D reasoning segmentation:** Train on Surprise3D dataset from scratch:
+
+- **Surprise3D finetune (recommended):** From the repo root of this baseline, build ops once (`bash scripts/build_pointgroup_ops.sh`), then run the wrapper (see `docs/finetune_eval_scripts.md` for env vars such as `REASON3D_INIT_CKPT`, `REASON3D_PTS_ROOT`, `REASON3D_PTH_SUBDIR`):
+
+```bash
+REASON3D_INIT_CKPT=<path_to_reason3d_pretrained.pth> bash scripts/run_surprise_finetune.sh
 ```
+
+Configs for **geo** (geometry-aware) and **chain** variants: `scripts/run_surprise_finetune_geo.sh`, `scripts/run_surprise_finetune_chain.sh`, etc.
+
+- **ScanRefer-style scratch config (legacy YAML in this fork):**
+
+```bash
 python -m torch.distributed.run --nproc_per_node=4 --master_port=29501 train.py --cfg-path lavis/projects/reason3d/train/reason3d_scanrefer_scratch.yaml
 ```
 
 ## Evaluation
-- **3D reasoning segmentation:** Evaluate on Surprise3D dataset: 
+
+- **Surprise3D val (recommended):**
+
+```bash
+REASON3D_CKPT=<path_to_checkpoint.pth> bash scripts/run_surprise_zeroshot_eval.sh
 ```
+
+Small / geo eval wrappers: `scripts/run_surprise_zeroshot_eval_small.sh`, `scripts/run_surprise_zeroshot_eval_small_geo.sh`, `scripts/run_surprise_zeroshot_eval_small_chain.sh`.
+
+- **Legacy val YAML:**
+
+```bash
 python evaluate.py --cfg-path lavis/projects/reason3d/val/reason3d_scanrefer_scratch.yaml --options model.pretrained=<path_to_pretrained_checkpoint> run.save_results=True
 ```
-Note: this repo currently only supports batch size = 1 for inference. 
 
-Add `run.save_results=True` option if you want to save prediction results.
+Note: inference is typically run with batch size 1. Add `run.save_results=True` (or use the eval scripts’ save flags) if you want prediction dumps on disk.
 
 
 ## Visualization

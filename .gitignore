@@ -1,0 +1,6 @@
+# Local clones with their own .git — not part of this repo (use submodule or install separately).
+third_party/scannetpp/
+third_party/unidet3d/
+
+# Local notes / paper draft — not published with the repo.
+report/

@@ -1,23 +1,28 @@
-# Finetune Reason3D on Surprise-style 3D referring (train JSON + ScanNet++ .pth).
+# Quick geo finetune: small train subset + few epochs to get a checkpoint sooner.
+# Same stack as reason3d_surprise_finetune_geo.yaml; override paths if needed.
 #
-# From Models/reason3d (after conda activate, PYTHONPATH=., pointgroup_ops built):
-#   REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune.sh
+#   REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune_geo.sh
+#   CFG=lavis/projects/reason3d/train/reason3d_surprise_finetune_geo_quick.yaml
 #
-# Override data roots or hyperparameters, e.g.:
-#   REASON3D_TRAIN_OPTIONS="run.max_epoch=5 run.batch_size_train=2 datasets.3d_refer.dataset_init.pth_rel_subdir=processed_trial"
-# Or use run_surprise_finetune.sh env: REASON3D_PTH_SUBDIR, REASON3D_PTS_ROOT, REASON3D_INSTANCE_CACHE_FILE.
-# If you see AssertionError on gt_pmask in __getitem__, keep filter_missing_gt_in_pth: true (default here).
+# Or one-liner:
+#   CFG=lavis/projects/reason3d/train/reason3d_surprise_finetune_geo_quick.yaml \
+#     REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune_geo.sh
 #
-# Resume an LAVIS training run (runner checkpoint), not the same as REASON3D_INIT_CKPT:
-#   REASON3D_RESUME_CKPT=/path/to/output/ckpt_epoch_10.pth bash scripts/run_surprise_finetune.sh
+# Tune subset size / epochs:
+#   REASON3D_TRAIN_OPTIONS="datasets.3d_refer_geo.dataset_init.train_max_samples=256 datasets.3d_refer_geo.dataset_init.eval_max_samples=128 run.max_epoch=3"
 
 model:
-  arch: reason3d_t5
+  arch: reason3d_t5_geo
   model_type: pretrain_flant5xl
-  # Set by run_surprise_finetune.sh via --options (starting Reason3D weights).
   reason3d_checkpoint: null
   use_grad_checkpoint: False
   mask_embedding: False
+  geo_relational_cfg:
+    knn_k: 12
+    knn_chunk_size: 256
+    num_layers: 2
+    hidden_dim: 96
+    dropout: 0.0
   point_encoder_cfg:
     input_channel: 6
     media: 32
@@ -41,18 +46,16 @@ model:
   pred_confidence: 0.5
 
 datasets:
-  3d_refer:
+  3d_refer_geo:
     dataset_init:
       pth_rel_subdir: "processed_surprise_full_pth"
-      # Same as eval: drop rows whose object_id never appears in sampled_instance_anno_id (top100 / labeling),
-      # otherwise __getitem__ asserts on an empty GT mask.
       filter_missing_gt_in_pth: true
-      # Speed up *subsequent* runs: first job with instance_id_cache_write: true builds this JSON (one-time heavy torch.load per scene);
-      # later runs set instance_id_cache_write: false and reuse the file (no .pth reads during filter).
       instance_id_cache_file: "/nfs-stor/lan.wei/data/scannetpp/processed_surprise_full_pth/.reason3d_instance_ids.json"
       instance_id_cache_write: false
-      # Optional: dump filtered QA list after all filters (use as ann path next time; still use instance cache for speed).
-      # write_filtered_annotations_to: "/nfs-stor/lan.wei/data/annotations/surprise_train.filtered.json"
+      # First N rows after filters (JSON order); increase when you want full training / val / test.
+      train_max_samples: 512
+      # Val and test splits (non-train): same cap; see ThreeDReferDataset (eval_max_samples).
+      eval_max_samples: 512
     text_processor:
       train:
         name: "blip_question"
@@ -76,9 +79,9 @@ run:
   init_lr: 1e-4
   min_lr: 1e-5
   warmup_lr: 1e-8
-  warmup_steps: 1000
+  warmup_steps: 500
   weight_decay: 0.05
-  max_epoch: 20
+  max_epoch: 2
   batch_size_train: 2
   batch_size_eval: 1
   num_workers: 4
@@ -88,7 +91,7 @@ run:
   num_beams: 5
   inference_method: "generate"
   seed: 42
-  output_dir: "output/reason3d_surprise_finetune"
+  output_dir: "output/reason3d_surprise_finetune_geo_quick"
   amp: True
   evaluate: False
   train_splits: ["train"]

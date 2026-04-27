@@ -35,6 +35,7 @@ class ThreeDReferDataset(BaseDataset):
         eval_scene_ids=None,
         eval_scene_allowlist_file=None,
         eval_max_samples=None,
+        train_max_samples=None,
         instance_id_cache_file=None,
         instance_id_cache_write=False,
         write_filtered_annotations_to=None,
@@ -46,6 +47,7 @@ class ThreeDReferDataset(BaseDataset):
         super().__init__(text_processor, pts_root, ann_paths)
         self.pth_rel_subdir = pth_rel_subdir
         self.eval_max_samples = eval_max_samples
+        self.train_max_samples = train_max_samples
         self._eval_scene_set: Optional[Set[str]] = None
         self._pth_inst_cache: Dict[str, Optional[Set[int]]] = {}
         self._instance_id_cache_path: Optional[str] = None
@@ -94,11 +96,13 @@ class ThreeDReferDataset(BaseDataset):
                     len([k for k, v in self._pth_inst_cache.items() if v is not None]),
                 )
             else:
-                logging.info(
+                logging.debug(
                     "ThreeDReferDataset: filter_missing_gt_in_pth will torch.load up to %d unique scene .pth "
                     "files under %s (subdir=%s). One full read per scene to cache instance ids; on full train "
                     "or slow/network storage this often takes several minutes and runs only once at init. "
-                    "To skip next time, set dataset_init.instance_id_cache_file and instance_id_cache_write: true once.",
+                    "To skip next time, set dataset_init.instance_id_cache_file and instance_id_cache_write: true once. "
+                    "To hide this message, use log level DEBUG only for lavis.datasets or set "
+                    "filter_missing_gt_in_pth=false if you accept possible empty-GT rows.",
                     len(uniq_scenes),
                     self.pts_root,
                     self.pth_rel_subdir,
@@ -152,16 +156,28 @@ class ThreeDReferDataset(BaseDataset):
                     "Check scene ids and that val JSON contains those scenes."
                 )
 
-        if self.eval_max_samples is not None and int(self.eval_max_samples) > 0:
-            cap = int(self.eval_max_samples)
-            if len(self.annotation) > cap:
-                logging.info(
-                    "ThreeDReferDataset: eval_max_samples=%d truncating %d -> %d",
-                    cap,
-                    len(self.annotation),
-                    cap,
-                )
-                self.annotation = self.annotation[:cap]
+        cap = None
+        cap_name = None
+        if self.training:
+            if self.train_max_samples is not None and int(self.train_max_samples) > 0:
+                cap = int(self.train_max_samples)
+                cap_name = "train_max_samples"
+            elif self.eval_max_samples is not None and int(self.eval_max_samples) > 0:
+                cap = int(self.eval_max_samples)
+                cap_name = "eval_max_samples"
+        else:
+            if self.eval_max_samples is not None and int(self.eval_max_samples) > 0:
+                cap = int(self.eval_max_samples)
+                cap_name = "eval_max_samples"
+        if cap is not None and len(self.annotation) > cap:
+            logging.info(
+                "ThreeDReferDataset: %s=%d truncating %d -> %d",
+                cap_name,
+                cap,
+                len(self.annotation),
+                cap,
+            )
+            self.annotation = self.annotation[:cap]
 
         if self._write_filtered_ann_path and is_main_process():
             wp = self._write_filtered_ann_path
@@ -182,6 +198,51 @@ class ThreeDReferDataset(BaseDataset):
         self.with_elastic = False
         self.aug = True      
         self.data_cache = {}
+
+    def apply_eval_resume_skip(self, done_keys: Set[Tuple[str, int]]) -> Tuple[int, int]:
+        """
+        Remove annotations already present in a qualitative predictions.jsonl (eval resume).
+        done_keys: set of (scene_id, ann_id) matching rows written by refer_seg_task.valid_step.
+        Returns (n_before, n_after).
+        """
+        if not done_keys:
+            return len(self.annotation), len(self.annotation)
+        before = len(self.annotation)
+
+        def key_for(a):
+            sid = a.get("scene_id")
+            if sid is None:
+                return None
+            aid = a.get("ann_id", 0)
+            try:
+                aid_i = int(aid)
+            except (TypeError, ValueError):
+                aid_i = 0
+            return (str(sid), aid_i)
+
+        self.annotation = [a for a in self.annotation if key_for(a) not in done_keys]
+        after = len(self.annotation)
+        if after == 0:
+            raise RuntimeError(
+                "eval resume removed all annotations (done_keys matches every row). "
+                "Check predictions.jsonl vs current val JSON / filters."
+            )
+        # Re-sync maps after slicing (same logic as __init__ scene_id loop).
+        self.scene_ids = {}
+        n = 0
+        for ann in self.annotation:
+            img_id = ann["scene_id"]
+            if img_id not in self.scene_ids:
+                self.scene_ids[img_id] = n
+                n += 1
+        self._add_instance_ids()
+        logging.info(
+            "ThreeDReferDataset: eval resume skip kept %d / %d annotations (skipped %d completed keys).",
+            after,
+            before,
+            before - after,
+        )
+        return before, after
 
     def _instance_ids_in_pth(self, scene_id: str) -> Optional[Set[int]]:
         if scene_id in self._pth_inst_cache:
@@ -345,11 +406,19 @@ class ThreeDReferDataset(BaseDataset):
         return ids if ids else None
 
     def get_sp_filenames(self):
-        filenames = glob.glob(osp.join(self.pts_root, self.pth_rel_subdir, "*" + ".pth"))
-        assert len(filenames) > 0, "Empty dataset."
+        base = osp.join(self.pts_root, self.pth_rel_subdir)
+        pattern = osp.join(base, "*.pth")
+        filenames = glob.glob(pattern)
+        if len(filenames) == 0:
+            raise FileNotFoundError(
+                "No .pth files matched the point cloud glob (empty dataset). "
+                f"Expected files under: {osp.abspath(base)!r} "
+                f"(pts_root={osp.abspath(self.pts_root)!r}, pth_rel_subdir={self.pth_rel_subdir!r}). "
+                "Set datasets.3d_refer.build_info.points.storage and dataset_init.pth_rel_subdir "
+                "so join(pts_root, pth_rel_subdir, '<scene_id>.pth') is where your preprocess wrote outputs."
+            )
         filenames = sorted(filenames)
         if self._eval_scene_set:
-            base = osp.join(self.pts_root, self.pth_rel_subdir)
             keep = {
                 osp.join(base, f"{sid}.pth")
                 for sid in self._eval_scene_set

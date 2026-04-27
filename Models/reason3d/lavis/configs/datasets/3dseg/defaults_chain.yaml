@@ -1,0 +1,17 @@
+ # Copyright (c) 2022, salesforce.com, inc.
+ # All rights reserved.
+ # SPDX-License-Identifier: BSD-3-Clause
+ # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+
+datasets:
+  3d_refer_chain:
+    data_type: [points]
+    dataset_init:
+      pth_rel_subdir: "processed_surprise_full_pth"
+      # object_name_keys: ["object_name"]
+      # max_object_name_chars: 96
+      # chain_answer_fallback_plain: true
+
+    build_info:
+      annotations:
+      points:

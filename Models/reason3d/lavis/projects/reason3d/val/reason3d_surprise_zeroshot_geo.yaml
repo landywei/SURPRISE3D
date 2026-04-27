@@ -1,20 +1,19 @@
-# Same as reason3d_surprise_zeroshot.yaml but only scenes listed in scripts/trial_scenes.txt
-# (3 scenes; optional eval_max_samples only caps QA rows, not the scene set). Use for quick smoke eval.
-#
-#   python evaluate.py --cfg-path lavis/projects/reason3d/val/reason3d_surprise_zeroshot_small.yaml \
-#     --options model.reason3d_checkpoint=/path/to/reason3d_checkpoint.pth
-#
-# Inline scenes instead of a file:
-#   --options datasets.3d_refer.dataset_init.eval_scene_ids=[7739004a45,3928249b53]
-# Cap QA rows after scene filter (optional):
-#   --options datasets.3d_refer.dataset_init.eval_max_samples=32
+# Full Surprise val split, geo model + 3d_refer_geo (same scene set as bare full zeroshot).
+#   CFG=lavis/projects/reason3d/val/reason3d_surprise_zeroshot_geo.yaml bash scripts/run_surprise_zeroshot_eval.sh
 
 model:
-  arch: reason3d_t5
+  arch: reason3d_t5_geo
   model_type: pretrain_flant5xl
   reason3d_checkpoint: null
   use_grad_checkpoint: False
   mask_embedding: False
+  geo_relational_cfg:
+    knn_k: 16
+    knn_chunk_size: 128
+    use_checkpoint: true
+    num_layers: 2
+    hidden_dim: 128
+    dropout: 0.0
   point_encoder_cfg:
     input_channel: 6
     media: 32
@@ -38,12 +37,10 @@ model:
   pred_confidence: 0.5
 
 datasets:
-  3d_refer:
+  3d_refer_geo:
     dataset_init:
       filter_missing_gt_in_pth: true
       pth_rel_subdir: "processed_surprise_full_pth"
-      # 3-scene small eval; mirror in reason3d_surprise_zeroshot_small_geo.yaml
-      eval_scene_allowlist_file: "scripts/trial_scenes.txt"
     text_processor:
       train:
         name: "blip_question"
@@ -75,9 +72,9 @@ run:
   num_beams: 5
   inference_method: "generate"
   seed: 42
-  output_dir: "output/reason3d_surprise_zeroshot_small"
-  # When true, writes qualitative/ under the run output_dir (see lavis/tasks/refer_seg_task.py).
-  save_eval_predictions: true
+  output_dir: "output/reason3d_surprise_zeroshot_geo"
+  save_eval_predictions: false
+  save_eval_prediction_masks: false
   amp: True
   evaluate: True
   train_splits: []

@@ -29,6 +29,8 @@ fi
 if command -v conda >/dev/null 2>&1; then
   eval "$(conda shell.bash hook)" || true
   conda activate reason3d310 2>/dev/null || conda activate reason3d 2>/dev/null || true
+  # conda-forge gcc_linux-64 deactivate.d script reads this under bash nounset; define if missing.
+  export _CONDA_PYTHON_SYSCONFIGDATA_NAME_USED="${_CONDA_PYTHON_SYSCONFIGDATA_NAME_USED:-}"
 else
   if command -v python >/dev/null 2>&1; then
     PFX="$(python -c "import os, sys; p=os.path.realpath(sys.executable); print(os.path.dirname(os.path.dirname(p)))" 2>/dev/null || true)"

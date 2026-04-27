@@ -1,20 +1,18 @@
-# Finetune Reason3D on Surprise-style 3D referring (train JSON + ScanNet++ .pth).
+# Finetune Reason3D with chain-style supervision: oracle ``object_name`` (or configured keys)
+# v2: validation skipped during training (valid_splits: []) to reduce wall time.
+#     Output goes to output/reason3d_surprise_finetune_chain_v2 (separate from v1 logs).
+#     Uses fixed blip_processors.py (decimal points preserved in abs-distance queries).
+# appears in the answer string before ``[SEG]`` (see ``ThreeDReferDatasetChain``).
 #
-# From Models/reason3d (after conda activate, PYTHONPATH=., pointgroup_ops built):
-#   REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune.sh
+# From Models/reason3d:
+#   REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune_chain.sh
 #
-# Override data roots or hyperparameters, e.g.:
-#   REASON3D_TRAIN_OPTIONS="run.max_epoch=5 run.batch_size_train=2 datasets.3d_refer.dataset_init.pth_rel_subdir=processed_trial"
-# Or use run_surprise_finetune.sh env: REASON3D_PTH_SUBDIR, REASON3D_PTS_ROOT, REASON3D_INSTANCE_CACHE_FILE.
-# If you see AssertionError on gt_pmask in __getitem__, keep filter_missing_gt_in_pth: true (default here).
-#
-# Resume an LAVIS training run (runner checkpoint), not the same as REASON3D_INIT_CKPT:
-#   REASON3D_RESUME_CKPT=/path/to/output/ckpt_epoch_10.pth bash scripts/run_surprise_finetune.sh
+# Overrides use the ``datasets.3d_refer_chain`` prefix, e.g.:
+#   REASON3D_TRAIN_OPTIONS="datasets.3d_refer_chain.dataset_init.train_max_samples=2048"
 
 model:
   arch: reason3d_t5
   model_type: pretrain_flant5xl
-  # Set by run_surprise_finetune.sh via --options (starting Reason3D weights).
   reason3d_checkpoint: null
   use_grad_checkpoint: False
   mask_embedding: False
@@ -41,18 +39,15 @@ model:
   pred_confidence: 0.5
 
 datasets:
-  3d_refer:
+  3d_refer_chain:
     dataset_init:
       pth_rel_subdir: "processed_surprise_full_pth"
-      # Same as eval: drop rows whose object_id never appears in sampled_instance_anno_id (top100 / labeling),
-      # otherwise __getitem__ asserts on an empty GT mask.
       filter_missing_gt_in_pth: true
-      # Speed up *subsequent* runs: first job with instance_id_cache_write: true builds this JSON (one-time heavy torch.load per scene);
-      # later runs set instance_id_cache_write: false and reuse the file (no .pth reads during filter).
       instance_id_cache_file: "/nfs-stor/lan.wei/data/scannetpp/processed_surprise_full_pth/.reason3d_instance_ids.json"
       instance_id_cache_write: false
-      # Optional: dump filtered QA list after all filters (use as ann path next time; still use instance cache for speed).
-      # write_filtered_annotations_to: "/nfs-stor/lan.wei/data/annotations/surprise_train.filtered.json"
+      object_name_keys: ["object_name"]
+      max_object_name_chars: 96
+      chain_answer_fallback_plain: true
     text_processor:
       train:
         name: "blip_question"
@@ -83,16 +78,17 @@ run:
   batch_size_eval: 1
   num_workers: 4
   accum_grad_iters: 1
-  max_len: 60
+  # Slightly higher cap so free-form rationale + ``[SEG]`` fits under generation during eval.
+  max_len: 96
   min_len: 1
   num_beams: 5
   inference_method: "generate"
   seed: 42
-  output_dir: "output/reason3d_surprise_finetune"
+  output_dir: "output/reason3d_surprise_finetune_chain_v2"
   amp: True
   evaluate: False
   train_splits: ["train"]
-  valid_splits: ["val"]
+  valid_splits: []
   test_splits: []
   device: "cuda"
   gpu: 0

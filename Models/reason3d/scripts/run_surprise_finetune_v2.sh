@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Finetune Reason3D on Surprise train JSON + ScanNet++ processed .pth (see train/reason3d_surprise_finetune.yaml).
+# Finetune Reason3D on Surprise train JSON (v2: no validation, decimal fix) + ScanNet++ processed .pth (see train/reason3d_surprise_finetune.yaml).
 # Default .pth layout: join(points.storage, pth_rel_subdir, "<scene>.pth") — YAML uses processed_surprise_full_pth.
 # Override like eval scripts:
 #   REASON3D_PTH_SUBDIR=processed_surprise_full_pth
@@ -23,6 +23,9 @@
 #
 # Optional runner resume (training state from output_dir):
 #   REASON3D_RESUME_CKPT=/path/to/ckpt_epoch_5.pth ...
+# Intra-epoch checkpoints (e.g. every 2000 optimizer steps) + resume from mid-epoch:
+#   REASON3D_TRAIN_OPTIONS="run.save_every_n_steps=2000" ...
+#   REASON3D_RESUME_CKPT=/path/to/.../checkpoint_ep0003_iter00002000.pth ...
 #
 # Extra config overrides (space-separated key=value):
 #   REASON3D_TRAIN_OPTIONS="run.max_epoch=50 run.output_dir=output/my_run" ...
@@ -32,7 +35,7 @@ REASON3D="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REASON3D"
 export PYTHONPATH="${REASON3D}:${PYTHONPATH:-}"
 
-CFG="${CFG:-lavis/projects/reason3d/train/reason3d_surprise_finetune.yaml}"
+CFG="${CFG:-lavis/projects/reason3d/train/reason3d_surprise_finetune_v2.yaml}"
 INIT_CKPT="${REASON3D_INIT_CKPT:-}"
 if [[ -z "$INIT_CKPT" && -n "${REASON3D_CKPT:-}" ]]; then
   INIT_CKPT="$REASON3D_CKPT"
@@ -58,9 +61,8 @@ if [[ -n "${REASON3D_RESUME_CKPT:-}" ]]; then
   OPTS+=( "run.resume_ckpt_path=${REASON3D_RESUME_CKPT}" )
 fi
 
-if [[ -n "${REASON3D_PTH_SUBDIR:-}" ]]; then
-  OPTS+=( "datasets.3d_refer.dataset_init.pth_rel_subdir=${REASON3D_PTH_SUBDIR}" )
-fi
+REASON3D_PTH_SUBDIR="${REASON3D_PTH_SUBDIR:-processed_surprise_full_pth}"
+OPTS+=( "datasets.3d_refer.dataset_init.pth_rel_subdir=${REASON3D_PTH_SUBDIR}" )
 if [[ -n "${REASON3D_PTS_ROOT:-}" ]]; then
   OPTS+=( "datasets.3d_refer.build_info.points.storage=${REASON3D_PTS_ROOT}" )
 fi

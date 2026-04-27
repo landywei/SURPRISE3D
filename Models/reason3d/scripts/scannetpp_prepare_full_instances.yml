@@ -1,0 +1,30 @@
+# ScanNet++ prepare_training_data: full semantic label list + all instance objectIds on vertices.
+# Uses patched third_party/scannetpp (all_instance_classes: true) — see SURPRISE3D/third_party/scannetpp.
+#
+# Output: new .pth dir (default processed_full_instances/) — point Reason3D pth_rel_subdir here after
+# merge superpoints. WARNING: sampled_labels use indices into semantic_classes.txt (~2.8k classes);
+# Reason3D / SPFormer may expect benchmark-sized semantics — validate on a few scenes before full retrain.
+#
+# Run from repo (see scripts/run_scannetpp_prepare_full_instances.sh):
+#   SCANNETPP_ROOT=/nfs-stor/lan.wei/data/scannetpp \
+#   LIST_PATH=/path/to/scene_ids_one_per_line.txt \
+#   bash scripts/run_scannetpp_prepare_full_instances.sh
+
+data:
+  data_root: /nfs-stor/lan.wei/data/scannetpp/data
+  # Full ScanNet++ semantic vocabulary (no benchmark CSV remap).
+  labels_path: /nfs-stor/lan.wei/data/scannetpp/metadata/semantic_classes.txt
+  # Omit mapping_file (factory passes null) so label_ndx is the line index in labels_path.
+  use_instances: true
+  # Ignored when all_instance_classes is true; kept for YAML compatibility.
+  instance_labels_path: /nfs-stor/lan.wei/data/scannetpp/metadata/semantic_benchmark/top100_instance.txt
+  all_instance_classes: true
+  ignore_label: -100
+  sample_factor: 1.0
+  transforms:
+    - add_mesh_vertices
+    - map_label_to_index
+    - get_labels_on_vertices
+    - sample_points_on_mesh
+
+out_dir: /nfs-stor/lan.wei/data/scannetpp/processed_full_instances

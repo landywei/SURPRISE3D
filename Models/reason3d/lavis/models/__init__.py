@@ -12,6 +12,8 @@ from lavis.common.registry import registry
 
 from lavis.models.base_model import BaseModel
 from lavis.models.reason3d_models.reason3d_t5 import Reason3DT5
+
+import lavis.models.reason3d_geo.reason3d_t5_geo  # noqa: F401 — registers reason3d_t5_geo
 from lavis.processors.base_processor import BaseProcessor
 
 

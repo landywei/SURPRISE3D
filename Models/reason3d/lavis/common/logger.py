@@ -6,7 +6,9 @@
 """
 
 import datetime
+import json
 import logging
+import os
 import time
 from collections import defaultdict, deque
 
@@ -145,9 +147,9 @@ class MetricLogger(object):
             if i % print_freq == 0 or i == len(iterable) - 1:
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
-                if torch.cuda.is_available():
-                    print(
-                        log_msg.format(
+                if dist_utils.is_main_process():
+                    if torch.cuda.is_available():
+                        msg = log_msg.format(
                             i,
                             len(iterable),
                             eta=eta_string,
@@ -156,10 +158,8 @@ class MetricLogger(object):
                             data=str(data_time),
                             memory=torch.cuda.max_memory_allocated() / MB,
                         )
-                    )
-                else:
-                    print(
-                        log_msg.format(
+                    else:
+                        msg = log_msg.format(
                             i,
                             len(iterable),
                             eta=eta_string,
@@ -167,12 +167,17 @@ class MetricLogger(object):
                             time=str(iter_time),
                             data=str(data_time),
                         )
-                    )
+                    logging.info(msg)
             i += 1
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print("{} Total time: {} ({:.4f} s / it)".format(header, total_time_str, total_time / len(iterable)))
+        if dist_utils.is_main_process():
+            logging.info(
+                "{} Total time: {} ({:.4f} s / it)".format(
+                    header, total_time_str, total_time / max(len(iterable), 1)
+                )
+            )
 
 
 class AttrDict(dict):
@@ -187,3 +192,38 @@ def setup_logger():
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[logging.StreamHandler()],
     )
+
+
+def setup_train_disk_logging(output_dir: str) -> None:
+    """
+    Append INFO logs to ``<output_dir>/train.log`` (rank 0 only).
+
+    Called from ``RunnerBase.setup_output_dir`` after the run directory exists.
+    Idempotent: skips if a FileHandler for that path is already attached.
+    """
+    if not dist_utils.is_main_process() or not output_dir:
+        return
+    os.makedirs(output_dir, exist_ok=True)
+    train_log = os.path.abspath(os.path.join(output_dir, "train.log"))
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, logging.FileHandler):
+            try:
+                if os.path.abspath(h.baseFilename) == train_log:
+                    return
+            except Exception:
+                continue
+    fh = logging.FileHandler(train_log, mode="a", encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    root.addHandler(fh)
+    logging.info("Disk logging enabled: %s", train_log)
+
+
+def append_train_metrics_jsonl(output_dir: str, record: dict) -> None:
+    """Append one JSON object per line for easy plotting / grep (rank 0 only)."""
+    if not dist_utils.is_main_process() or not output_dir:
+        return
+    path = os.path.join(output_dir, "train_metrics.jsonl")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, default=str) + "\n")

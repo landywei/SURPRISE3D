@@ -8,6 +8,9 @@
 from lavis.datasets.builders.base_dataset_builder import load_dataset_config
 from lavis.datasets.builders.seg3d_builder import ThreeDReferBuilder
 
+import lavis.datasets.builders.seg3d_builder_geo  # noqa: F401 — registers 3d_refer_geo
+import lavis.datasets.builders.seg3d_builder_chain  # noqa: F401 — registers 3d_refer_chain
+
 from lavis.common.registry import registry
 
 __all__ = [

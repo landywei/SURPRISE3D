@@ -19,6 +19,7 @@ from lavis.common.dist_utils import (
     download_cached_file,
     get_rank,
     get_world_size,
+    is_dist_avail_and_initialized,
     is_main_process,
     main_process,
 )
@@ -417,8 +418,17 @@ class RunnerBase:
                 During training, we will reload the best checkpoint for validation.
                 During testing, we will use provided weights and skip reloading the best checkpoint .
         """
+        # Accessing self.dataloaders triggers reorg_datasets_by_split + concat_datasets as a
+        # side effect, transforming self.datasets from {builder_name: {split: obj}} to
+        # {split: obj}. This must happen before we look up self.datasets[split_name] below.
         data_loader = self.dataloaders.get(split_name, None)
         assert data_loader, "data_loader for split {} is None.".format(split_name)
+
+        dataset = self.datasets[split_name]
+        # Allow tasks to shrink the dataset (e.g. eval resume) before loaders are materialized.
+        self.task.prepare_eval_dataset_resume(dataset=dataset, split_name=split_name)
+        if is_dist_avail_and_initialized():
+            dist.barrier()
 
         # TODO In validation, you need to compute loss as well as metrics
         # TODO consider moving to model.before_evaluation()
@@ -429,7 +439,7 @@ class RunnerBase:
 
         self.task.before_evaluation(
             model=model,
-            dataset=self.datasets[split_name],
+            dataset=dataset,
         )
         results = self.task.evaluation(model, data_loader)
 

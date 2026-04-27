@@ -10,7 +10,7 @@
 #   --options datasets.3d_refer.build_info.annotations.test.storage=/nfs-stor/lan.wei/data/annotations/surprise_val.json \
 #             datasets.3d_refer.build_info.points.storage=/nfs-stor/lan.wei/data/scannetpp \
 #             datasets.3d_refer.dataset_init.pth_rel_subdir=processed_trial
-# Default pth_rel_subdir is "processed" (prepare_training_data output), not "scannetpp".
+# Default pth_rel_subdir matches Surprise full PTHs (see scripts/run_surprise_zeroshot_eval.sh / defaults.yaml).
 #
 # Small scene subset: use val/reason3d_surprise_zeroshot_small.yaml or set
 #   datasets.3d_refer.dataset_init.eval_scene_allowlist_file=scripts/trial_scenes.txt
@@ -49,7 +49,7 @@ datasets:
   3d_refer:
     dataset_init:
       filter_missing_gt_in_pth: true
-      pth_rel_subdir: "processed"
+      pth_rel_subdir: "processed_surprise_full_pth"
     text_processor:
       train:
         name: "blip_question"
@@ -82,8 +82,9 @@ run:
   inference_method: "generate"
   seed: 42
   output_dir: "output/reason3d_surprise_zeroshot"
-  # Set true to save per-sample masks + JSONL for qualitative analysis (full val can be large).
+  # Set true to save qualitative/predictions.jsonl (and optional masks; full val is large).
   save_eval_predictions: false
+  save_eval_prediction_masks: false
   amp: True
   evaluate: True
   train_splits: []

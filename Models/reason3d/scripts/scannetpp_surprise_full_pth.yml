@@ -1,0 +1,28 @@
+# ScanNet++ -> Reason3D-style .pth with:
+# - Full semantic list (semantic_classes.txt line indices; no benchmark CSV remap).
+# - All instance objectIds on vertices (all_instance_classes: true; ignores top100 whitelist).
+# - Uniform mesh sampling + nearest-vertex labels (same as upstream prepare_training_data).
+# - sampled_mesh_vertex_idx: per sampled point, index of nearest mesh vertex (remap any vtx field).
+#
+# Output directory is intentionally separate from processed/ defaults — set out_dir before large runs.
+#
+# Run:
+#   SCANNETPP_REPO=.../third_party/scannetpp \
+#   bash Models/reason3d/scripts/run_prepare_surprise_scannetpp_pth.sh
+
+data:
+  data_root: /nfs-stor/lan.wei/data/scannetpp/data
+  list_path: /path/to/scene_ids_one_per_line.txt
+  labels_path: /nfs-stor/lan.wei/data/scannetpp/metadata/semantic_classes.txt
+  use_instances: true
+  instance_labels_path: /nfs-stor/lan.wei/data/scannetpp/metadata/semantic_benchmark/top100_instance.txt
+  all_instance_classes: true
+  ignore_label: -100
+  sample_factor: 1.0
+  transforms:
+    - add_mesh_vertices
+    - map_label_to_index
+    - get_labels_on_vertices
+    - sample_points_on_mesh
+
+out_dir: /nfs-stor/lan.wei/data/scannetpp/processed_surprise_full_pth

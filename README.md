@@ -118,11 +118,9 @@ Surprise3D annotations are built on [ScanNet++ v2](https://kaldir.vc.in.tum.de/s
 # Clone this repo
 git clone https://github.com/liziwennba/SURPRISE3D.git
 cd SURPRISE3D
-
-# Preprocess ScanNet++ data for Surprise3D
-# See Models/reason3d/ for detailed preprocessing scripts
-python Models/reason3d/preprocess_scannetpp.py --data_root /path/to/scannetpp
 ```
+
+Surprise3D uses **ScanNet++** meshes/point clouds plus the Hugging Face JSON annotations. The Reason3D baseline expects processed `.pth` scenes (including superpoints): follow **Models/reason3d/README.md** (ScanNet++ semantics prep, `update_superpoints.py`, annotation file layout). Optional helpers under **Models/reason3d/scripts/** include `run_prepare_surprise_scannetpp_pth.sh` for preparing Surprise-aligned `.pth` layouts; see **Models/reason3d/docs/finetune_eval_scripts.md** for how finetune/eval scripts wire paths and configs.
 
 ### Step 4: Train & Evaluate Baselines
 
@@ -131,7 +129,19 @@ We provide modified baseline implementations adapted for Surprise3D:
 **Reason3D** (3D reasoning segmentation):
 ```bash
 cd Models/reason3d
-# See Models/reason3d/README.md for full setup, training, and evaluation
+# One-time: CUDA ops for the segmentor stack
+bash scripts/build_pointgroup_ops.sh
+
+# Finetune on Surprise3D (default: reason3d_surprise_finetune.yaml). Set paths for
+# your ScanNet++ tree, .pth subdir, and init checkpoint — see README + docs above.
+REASON3D_INIT_CKPT=/path/to/reason3d_pretrained.pth bash scripts/run_surprise_finetune.sh
+
+# Zero-shot / checkpoint evaluation on the val split
+REASON3D_CKPT=/path/to/your_checkpoint.pth bash scripts/run_surprise_zeroshot_eval.sh
+```
+
+Alternative configs (scratch training on other YAMLs, geometry-aware **geo**, chain-of-thought **chain** variants, small smoke evals) are listed in **Models/reason3d/docs/finetune_eval_scripts.md**. For the original Reason3D ScanRefer-style recipe only:
+```bash
 python -m torch.distributed.run --nproc_per_node=4 train.py \
   --cfg-path lavis/projects/reason3d/train/reason3d_scanrefer_scratch.yaml
 ```
@@ -178,6 +188,9 @@ Baseline methods evaluated on Surprise3D under the 3D Spatial Reasoning Segmenta
 SURPRISE3D/
 ├── Models/
 │   ├── reason3d/            # Modified Reason3D for Surprise3D training/eval
+│   │   ├── lavis/           # Configs, datasets, models (incl. geo / chain variants)
+│   │   ├── scripts/         # run_surprise_finetune.sh, zeroshot eval wrappers, etc.
+│   │   ├── docs/            # finetune_eval_scripts.md, architecture notes
 │   │   ├── train.py         # Distributed training script
 │   │   ├── evaluate.py      # Evaluation script
 │   │   ├── visualize.py     # Visualization of predictions
