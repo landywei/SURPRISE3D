@@ -29,6 +29,11 @@ Examples:
   # All JSONL rows (use --stride for smaller files; full res is large per row)
   python scripts/visualize_qualitative_preds.py --qual-dir .../qualitative \\
     --pts-root .../scannetpp --pth-subdir processed --export-all --out-dir /tmp/all_vis --stride 20
+
+  # Subset from sample_surprise_predictions.py (row_indices_bare.txt; skip lines with -1)
+  python scripts/visualize_qualitative_preds.py --qual-dir .../qualitative \\
+    --pts-root .../scannetpp --pth-subdir processed_surprise_full_pth \\
+    --row-indices-file .../row_indices_bare.txt --out-dir /tmp/vis100 --stride 5
 """
 
 from __future__ import annotations
@@ -428,6 +433,14 @@ def main() -> None:
         action="store_true",
         help="Export PLYs for every row (same files as --export-row per index). Implies heavy disk use if --stride 1.",
     )
+    p.add_argument(
+        "--row-indices-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="One 0-based predictions.jsonl row index per line (e.g. from sample_surprise_predictions.py). "
+        "Lines with -1 are skipped. Requires mask .npz for each row (not compatible with --export-all).",
+    )
     p.add_argument("--out-dir", type=str, default="qualitative_vis", help="Output directory for exports.")
     p.add_argument(
         "--pred-threshold",
@@ -484,8 +497,10 @@ def main() -> None:
 
     if args.export_all and args.export_row is not None:
         raise SystemExit("Use either --export-all or --export-row N, not both.")
+    if args.row_indices_file and (args.export_all or args.export_row is not None):
+        raise SystemExit("Use --row-indices-file alone for subset export (not with --export-all / --export-row).")
 
-    if args.export_row is not None or args.export_all:
+    if args.export_row is not None or args.export_all or args.row_indices_file:
         if int(args.stride) < 1:
             raise SystemExit("--stride must be >= 1")
         if not str(args.pts_root).strip():
@@ -509,6 +524,42 @@ def main() -> None:
                 pred_display=pdisp,
                 background_scale=bg,
             )
+        elif args.row_indices_file:
+            idx_path = os.path.abspath(args.row_indices_file)
+            if not os.path.isfile(idx_path):
+                raise SystemExit(f"Missing --row-indices-file {idx_path}")
+            indices: List[int] = []
+            with open(idx_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    indices.append(int(line))
+            n_ok = 0
+            for line_no, idx in enumerate(indices):
+                if idx < 0:
+                    print(f"skip line {line_no + 1}: index {idx}", file=sys.stderr)
+                    continue
+                if idx >= len(rows):
+                    print(f"skip line {line_no + 1}: index {idx} out of range [0,{len(rows)-1}]", file=sys.stderr)
+                    continue
+                print(f"[{n_ok + 1}/{len(indices)}] row {idx} scene={rows[idx].get('scene_id')!r}", flush=True)
+                cmd_export(
+                    rows,
+                    idx,
+                    qual_dir=qual_dir,
+                    pts_root=os.path.expanduser(args.pts_root),
+                    pth_subdir=args.pth_subdir,
+                    out_dir=out_abs,
+                    pred_threshold=args.pred_threshold,
+                    heatmap_pred=args.heatmap_pred,
+                    stride=st,
+                    pred_display=pdisp,
+                    background_scale=bg,
+                    verbose=False,
+                )
+                n_ok += 1
+            print(f"Done. Exported {n_ok} rows under {out_abs}", flush=True)
         else:
             cmd_export(
                 rows,
@@ -528,10 +579,16 @@ def main() -> None:
     if args.plot_iou_hist:
         cmd_plot_iou(rows, args.plot_iou_hist)
 
-    if not (args.list or args.export_row is not None or args.export_all or args.plot_iou_hist):
+    if not (
+        args.list
+        or args.export_row is not None
+        or args.export_all
+        or args.row_indices_file
+        or args.plot_iou_hist
+    ):
         p.print_help()
         print(
-            "\nNo action: pass --list, --export-row N, --export-all, and/or --plot-iou-hist out.png",
+            "\nNo action: pass --list, --export-row N, --export-all, --row-indices-file, and/or --plot-iou-hist out.png",
             file=sys.stderr,
         )
 

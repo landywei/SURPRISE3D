@@ -4,6 +4,8 @@
 
 ### NeurIPS 2025 (Datasets & Benchmarks Track)
 
+<p align="center"><em>Course final-project fork — Reason3D experiments & tooling; upstream dataset/paper unchanged.</em></p>
+
 **Jiaxin Huang**<sup>1,2</sup>, **Ziwen Li**<sup>3</sup>, **Hanlue Zhang**<sup>3</sup>, **Runnan Chen**<sup>1</sup>, **Zhengqing Gao**<sup>4</sup>, **Xiao He**<sup>2</sup>, **Yandong Guo**<sup>2</sup>, **Wenping Wang**<sup>4</sup>, **Tongliang Liu**<sup>3&dagger;</sup>, **Mingming Gong**<sup>5&dagger;</sup>
 
 <sup>1</sup>MBZUAI &nbsp; <sup>2</sup>AI2Robotics &nbsp; <sup>3</sup>The University of Sydney &nbsp; <sup>4</sup>Texas A&M University &nbsp; <sup>5</sup>The University of Melbourne
@@ -30,9 +32,19 @@
 
 ---
 
+## About this repository
+
+This repository is a **final-course-project fork** of the public [**SURPRISE3D**](https://github.com/liziwennba/SURPRISE3D) release. Everything in the banner above describes the **original benchmark and paper** (NeurIPS 2025 Datasets & Benchmarks). **Upstream** remains the canonical source for the dataset, project page, and citation.
+
+**What this fork adds** is engineering around the **Reason3D** baseline on Surprise3D: reproducible training and evaluation scripts (`Models/reason3d/scripts/`), configuration variants (**geo**, **chain**, and related YAMLs), and developer notes (`Models/reason3d/docs/`). Those extensions support the experiments written up for the course.
+
+**Final report companion:** aggregated metrics (small zeroshot split, aligned finetune checkpoints, bare vs. chain comparison) and command patterns are summarized in **`report/surprise3d_results_comparison.md`** — supplied with the **course submission** alongside this README; that folder is intentionally **not** tracked in git here.
+
+---
+
 ## TL;DR
 
-**Surprise3D** is a large-scale benchmark for evaluating **language-guided spatial reasoning segmentation** in 3D scenes. Unlike existing datasets, our queries **exclude object names** to force genuine spatial reasoning — no shortcut biases.
+The **Surprise3D** benchmark is a large-scale dataset for evaluating **language-guided spatial reasoning segmentation** in 3D scenes. Unlike many existing datasets, its spatial queries **avoid naming the target object** so models cannot rely on semantic shortcuts.
 
 | | Surprise3D |
 |:--|:--|
@@ -48,9 +60,9 @@
 
 ## Why Surprise3D?
 
-Current 3D vision-language datasets let models take **semantic shortcuts** — they match object names in queries rather than truly reasoning about spatial relationships. We found that even strong multimodal models **drop to near-zero accuracy** on pure spatial reasoning tasks.
+Current 3D vision-language datasets often allow **semantic shortcuts** — models match object names in queries instead of reasoning about spatial relationships. The Surprise3D paper shows that strong multimodal models can **drop to near-zero accuracy** on pure spatial reasoning under that setting.
 
-**Surprise3D fixes this** by:
+The benchmark addresses this by:
 1. Crafting queries that describe spatial relationships **without naming the target object**
 2. Covering four distinct spatial reasoning skills with human-written queries
 3. Providing a standardized 3D Spatial Reasoning Segmentation (3D-SRS) benchmark
@@ -115,8 +127,8 @@ Surprise3D annotations are built on [ScanNet++ v2](https://kaldir.vc.in.tum.de/s
 ### Step 3: Preprocess for Training
 
 ```bash
-# Clone this repo
-git clone https://github.com/liziwennba/SURPRISE3D.git
+# Clone this fork (use your course or personal remote URL)
+git clone <YOUR_REPO_URL>
 cd SURPRISE3D
 ```
 
@@ -124,7 +136,7 @@ Surprise3D uses **ScanNet++** meshes/point clouds plus the Hugging Face JSON ann
 
 ### Step 4: Train & Evaluate Baselines
 
-We provide modified baseline implementations adapted for Surprise3D:
+This fork ships modified baseline implementations adapted for Surprise3D (same spirit as upstream tooling):
 
 **Reason3D** (3D reasoning segmentation):
 ```bash
@@ -159,6 +171,10 @@ See individual READMEs under [Models/](Models/) for detailed instructions.
 ---
 
 ## Benchmark Results (3D-SRS)
+
+Official numbers for multiple methods appear in [arXiv:2507.07781](https://arxiv.org/abs/2507.07781). The placeholder table below mirrors the paper-style layout; fill from the publication for reporting.
+
+For **Reason3D experiments in this fork** (small eval split, bare vs. geo vs. chain, aligned checkpoint protocol), see the companion summary in **`report/surprise3d_results_comparison.md`** in your submission bundle.
 
 Baseline methods evaluated on Surprise3D under the 3D Spatial Reasoning Segmentation protocol:
 
@@ -243,8 +259,6 @@ We thank the authors of [Reason3D](https://github.com/KuanchihHuang/Reason3D) fo
 
 ## Contact
 
-For questions or collaborations:
+For questions about the **Surprise3D dataset and original publication**, contact the authors listed at the top of this README.
 
-- **Jiaxin Huang** — [jiaxin.huang@mbzuai.ac.ae](mailto:jiaxin.huang@mbzuai.ac.ae)
-- **Ziwen Li** — [ziwen.li@mbzuai.ac.ae](mailto:ziwen.li@mbzuai.ac.ae)
-- **Hanlue Zhang** — [hanlue.zhang@mbzuai.ac.ae](mailto:hanlue.zhang@mbzuai.ac.ae)
+For questions about **this fork’s** code paths and experiments, prefer course channels or the maintainer of this repository.
