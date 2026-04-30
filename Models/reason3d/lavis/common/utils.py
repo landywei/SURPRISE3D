@@ -33,9 +33,21 @@ from torchvision.datasets.utils import (
 
 
 def now():
+    """Timestamp string used as the default ``job_id`` (run output folder name).
+
+    Returns ``YYYYMMDDHHMMSS`` (second precision). The previous implementation
+    sliced ``%Y%m%d%H%M`` to ``[:-1]``, dropping the units digit of the minute
+    and effectively bucketing all runs that started within the same 10 minutes
+    into one folder, so back-to-back evals/trainings clobbered each other's
+    artifacts (qualitative/, metrics_*.json, checkpoints).
+
+    Multi-rank consistency is now ensured by ``evaluate.py`` / ``train.py``,
+    which compute this on rank 0 and broadcast it via
+    ``lavis.common.dist_utils.broadcast_object`` after ``init_distributed_mode``.
+    """
     from datetime import datetime
 
-    return datetime.now().strftime("%Y%m%d%H%M")[:-1]
+    return datetime.now().strftime("%Y%m%d%H%M%S")
 
 
 def is_url(url_or_filename):

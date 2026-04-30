@@ -54,6 +54,22 @@ def is_main_process():
     return get_rank() == 0
 
 
+def broadcast_object(obj, src=0):
+    """Broadcast a Python object from ``src`` rank to every rank.
+
+    Returns the local copy. No-op when ``torch.distributed`` is not
+    initialized (single-process runs), so callers can use it unconditionally.
+    Used to keep ``job_id`` (the timestamp-based run folder name) identical
+    across ranks under ``torchrun`` even when the rank-local clocks straddle a
+    second boundary at startup.
+    """
+    if not is_dist_avail_and_initialized():
+        return obj
+    container = [obj]
+    dist.broadcast_object_list(container, src=src)
+    return container[0]
+
+
 def init_distributed_mode(args):
     # YAML often sets distributed: false for single-GPU eval, but Slurm / wrappers may still export
     # RANK/WORLD_SIZE — honor explicit false and skip torch.distributed (avoids missing MASTER_ADDR).

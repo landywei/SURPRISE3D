@@ -111,6 +111,9 @@ class BaseTask:
         cuda_enabled=False,
         log_freq=50,
         accum_grad_iters=1,
+        save_every_n_steps=0,
+        save_callback=None,
+        start_iters_within_epoch=0,
     ):
         return self._train_inner_loop(
             epoch=epoch,
@@ -123,6 +126,9 @@ class BaseTask:
             log_freq=log_freq,
             cuda_enabled=cuda_enabled,
             accum_grad_iters=accum_grad_iters,
+            save_every_n_steps=save_every_n_steps,
+            save_callback=save_callback,
+            start_iters_within_epoch=start_iters_within_epoch,
         )
 
     def train_iters(
@@ -166,12 +172,28 @@ class BaseTask:
         log_freq=50,
         cuda_enabled=False,
         accum_grad_iters=1,
+        save_every_n_steps=0,
+        save_callback=None,
+        start_iters_within_epoch=0,
     ):
         """
         An inner training loop compatible with both epoch-based and iter-based training.
 
         When using epoch-based, training stops after one epoch; when using iter-based,
         training stops after #iters_per_epoch iterations.
+
+        Two extra epoch-based hooks are wired here for ``RunnerBase`` callers:
+
+        * ``save_every_n_steps`` + ``save_callback``: when both are provided
+          (``RunnerBase`` only invokes them with ``save_every_n_steps > 0``),
+          the callback ``save_callback(cur_iters)`` is invoked after every
+          ``save_every_n_steps`` optimizer steps so a long epoch can be
+          checkpointed mid-run. The callback writes a
+          ``checkpoint_ep<E>_iter<I>.pth`` file (see ``RunnerBase``).
+        * ``start_iters_within_epoch``: when resuming from a mid-epoch
+          checkpoint, advance the dataloader by this many batches and skip
+          the first ``start_iters_within_epoch`` LR-scheduler / model steps
+          so we pick up exactly where the previous run stopped.
         """
         use_amp = scaler is not None
 
@@ -194,7 +216,28 @@ class BaseTask:
             inner_epoch = start_iters // iters_per_epoch
             header = header + "; inner epoch [{}]".format(inner_epoch)
 
-        for i in metric_logger.log_every(range(iters_per_epoch), log_freq, header):
+        # Mid-epoch resume: advance the dataloader past iters that were
+        # already consumed in the interrupted run. Order of samples will
+        # not match the original run exactly (DataLoader shuffle is not
+        # checkpoint-aware), but it's a safe "resume forward" semantics.
+        if start_iters_within_epoch and start_iters_within_epoch > 0:
+            logging.info(
+                "Mid-epoch resume: skipping the first {} iterations of epoch {}.".format(
+                    start_iters_within_epoch, epoch
+                )
+            )
+            for _ in range(min(int(start_iters_within_epoch), int(iters_per_epoch))):
+                try:
+                    next(data_loader)
+                except StopIteration:
+                    break
+            iter_range = range(int(start_iters_within_epoch), int(iters_per_epoch))
+        else:
+            iter_range = range(int(iters_per_epoch))
+
+        save_every_n_steps = int(save_every_n_steps or 0)
+
+        for i in metric_logger.log_every(iter_range, log_freq, header):
             # if using iter-based runner, we stop after iters_per_epoch iterations.
             if i >= iters_per_epoch:
                 break
@@ -232,6 +275,21 @@ class BaseTask:
 
             metric_logger.update(loss=loss.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+
+            # Mid-epoch checkpoint hook: save when this is an optimizer-step
+            # boundary (so optimizer state is consistent) and the global iter
+            # within the epoch is a multiple of save_every_n_steps. The
+            # callback is gated on optimizer-step boundaries to avoid saving
+            # partway through gradient accumulation.
+            if (
+                save_callback is not None
+                and save_every_n_steps > 0
+                and ((i + 1) % accum_grad_iters == 0)
+                and ((i + 1) % save_every_n_steps == 0)
+            ):
+                save_callback(i)
+                if is_dist_avail_and_initialized():
+                    dist.barrier()
 
         # after train_epoch()
         # gather the stats from all processes

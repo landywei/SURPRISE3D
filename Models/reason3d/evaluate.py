@@ -15,7 +15,7 @@ import torch.backends.cudnn as cudnn
 
 import lavis.tasks as tasks
 from lavis.common.config import Config
-from lavis.common.dist_utils import get_rank, init_distributed_mode
+from lavis.common.dist_utils import broadcast_object, get_rank, init_distributed_mode, is_main_process
 from lavis.common.logger import setup_logger
 from lavis.common.optims import (
     LinearWarmupCosineLRScheduler,
@@ -65,14 +65,20 @@ def main():
     # allow auto-dl completes on main process without timeout when using NCCL backend.
     # os.environ["NCCL_BLOCKING_WAIT"] = "1"
 
-    # set before init_distributed_mode() to ensure the same job_id shared across all ranks.
-    # For eval resume (same qualitative/ dir), reuse the interrupted run's folder name, e.g.:
-    #   REASON3D_EVAL_JOB_ID=20260423192 REASON3D_EVAL_RESUME=1 bash scripts/run_surprise_zeroshot_eval_small.sh
-    job_id = os.environ.get("REASON3D_EVAL_JOB_ID", "").strip() or now()
-
     cfg = Config(parse_args())
 
     init_distributed_mode(cfg.run_cfg)
+
+    # Compute job_id on rank 0 and broadcast so every rank writes into the same
+    # output folder. Done AFTER init_distributed_mode (so dist is initialised)
+    # but BEFORE any rank writes to disk. Resume override: set REASON3D_EVAL_JOB_ID
+    # to the interrupted run's folder name, e.g.
+    #   REASON3D_EVAL_JOB_ID=20260423192156 REASON3D_EVAL_RESUME=1 bash scripts/run_surprise_zeroshot_eval_small.sh
+    if is_main_process():
+        job_id = os.environ.get("REASON3D_EVAL_JOB_ID", "").strip() or now()
+    else:
+        job_id = ""
+    job_id = broadcast_object(job_id, src=0)
 
     setup_seeds(cfg)
 

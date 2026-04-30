@@ -15,7 +15,7 @@ import torch.backends.cudnn as cudnn
 
 import lavis.tasks as tasks
 from lavis.common.config import Config
-from lavis.common.dist_utils import get_rank, init_distributed_mode
+from lavis.common.dist_utils import broadcast_object, get_rank, init_distributed_mode, is_main_process
 from lavis.common.logger import setup_logger
 from lavis.common.optims import (
     LinearWarmupCosineLRScheduler,
@@ -80,15 +80,22 @@ def main():
     # allow auto-dl completes on main process without timeout when using NCCL backend.
     # os.environ["NCCL_BLOCKING_WAIT"] = "1"
 
-    # set before init_distributed_mode() to ensure the same job_id shared across all ranks.
     args = parse_args()
 
     torch.multiprocessing.set_start_method("spawn")
-    job_id = now() if args.job_id is None else args.job_id
 
     cfg = Config(args)
 
     init_distributed_mode(cfg.run_cfg)
+
+    # Compute job_id on rank 0 (or use --job_id when provided) and broadcast to
+    # every rank so all ranks share one output folder. Done AFTER
+    # init_distributed_mode so dist is ready.
+    if is_main_process():
+        job_id = args.job_id if args.job_id is not None else now()
+    else:
+        job_id = ""
+    job_id = broadcast_object(job_id, src=0)
 
     setup_seeds(cfg)
 

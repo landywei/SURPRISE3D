@@ -1,0 +1,116 @@
+# Finetune Reason3D with chain v3 loss-only (chain text targets + per-instance GT
+# + best-of-set BCE/Dice + scale-aware dice). Architecture is identical to
+# `Reason3DT5`; only the criterion (`CriterionV3`) and dataset emission change.
+#
+# From Models/reason3d:
+#   REASON3D_INIT_CKPT=/path/to/reason3d.pth bash scripts/run_surprise_finetune_chainv3.sh
+#
+# Overrides use the `datasets.3d_refer_chainv3` prefix:
+#   REASON3D_TRAIN_OPTIONS="datasets.3d_refer_chainv3.dataset_init.train_max_samples=2048"
+#   REASON3D_TRAIN_OPTIONS="model.seg_criterion_cfg.enable_boundary=true model.seg_criterion_cfg.enable_point_aux=true"
+#
+# Companion design doc: Models/reason3d/docs/chainv3_design_proposal.md
+
+model:
+  arch: reason3d_t5_chainv3
+  model_type: pretrain_flant5xl
+  reason3d_checkpoint: null
+  use_grad_checkpoint: False
+  mask_embedding: False
+  point_encoder_cfg:
+    input_channel: 6
+    media: 32
+    normalize_before: True
+    return_blocks: True
+    fix_module: ["input_conv", "unet", "output_layer"]
+    pretrained: "/nfs-stor/lan.wei/data/checkpoints/spf_scannet_512.pth"
+  mask_decoder_cfg:
+    media: 32
+    num_layer: 6
+    d_model: 256
+    d_text: 512
+    nhead: 8
+    hidden_dim: 1024
+    dropout: 0.0
+    activation_fn: "gelu"
+    attn_mask: True
+  seg_criterion_cfg:
+    # Legacy weights (matches chain v2): [bce, dice, score, sample]
+    loss_weight: [1.0, 1.0, 0.5, 5.0]
+    loss_fun: "focal"
+    # v3 knobs (default config = "loss-only" ablation row)
+    enable_best_of_set: true
+    enable_scale_aware: true
+    enable_boundary: false
+    enable_point_aux: false
+    lambda_boundary: 0.5
+    lambda_point_aux: 0.5
+    lambda_cov: 0.1
+    small_size_threshold: 50
+    boundary_loss_type: "lovasz"
+  pred_confidence: 0.5
+
+datasets:
+  3d_refer_chainv3:
+    dataset_init:
+      pth_rel_subdir: "processed_surprise_full_pth"
+      filter_missing_gt_in_pth: true
+      instance_id_cache_file: "/nfs-stor/lan.wei/data/scannetpp/processed_surprise_full_pth/.reason3d_instance_ids.json"
+      instance_id_cache_write: false
+      object_name_keys: ["object_name"]
+      max_object_name_chars: 96
+      chain_answer_fallback_plain: true
+    text_processor:
+      train:
+        name: "blip_question"
+        prompt: ""
+      eval:
+        name: "blip_question"
+    build_info:
+      annotations:
+        train:
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_train.json
+        val:
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_val.json
+        test:
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_val.json
+      points:
+        storage: /nfs-stor/lan.wei/data/scannetpp
+
+run:
+  task: 3d_refer_seg_v3
+  lr_sched: "linear_warmup_cosine_lr"
+  init_lr: 1e-4
+  min_lr: 1e-5
+  warmup_lr: 1e-8
+  warmup_steps: 1000
+  weight_decay: 0.05
+  max_epoch: 20
+  batch_size_train: 2
+  batch_size_eval: 1
+  num_workers: 4
+  accum_grad_iters: 1
+  max_len: 96
+  min_len: 1
+  num_beams: 5
+  inference_method: "generate"
+  seed: 42
+  output_dir: "output/reason3d_surprise_finetune_chainv3"
+  amp: True
+  evaluate: False
+  # New (RunnerBase): epoch-end checkpoint is saved BEFORE eval so an OOM in
+  # eval cannot lose the just-trained weights. Set false to revert to legacy.
+  save_before_eval: True
+  # Mid-epoch checkpoint cadence (RunnerBase): 0 disables, otherwise writes
+  # checkpoint_ep<E>_iter<I>.pth every N optimizer steps. Resume by passing
+  # that file as REASON3D_RESUME_CKPT (the runner reads ``iters`` from the
+  # ckpt and skips the first ``iters+1`` batches of that epoch).
+  save_every_n_steps: 0
+  train_splits: ["train"]
+  valid_splits: []
+  test_splits: []
+  device: "cuda"
+  gpu: 0
+  world_size: 1
+  distributed: false
+  dist_url: "env://"

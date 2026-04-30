@@ -62,6 +62,13 @@ class RunnerBase:
         self._lr_sched = None
 
         self.start_epoch = 0
+        # When resuming from a mid-epoch checkpoint produced by
+        # ``save_every_n_steps``, this is set to the next iter index inside
+        # ``self.start_epoch`` to resume from. ``_train_inner_loop`` advances
+        # the dataloader past these iters before the main loop starts. Reset
+        # to 0 after the first resumed epoch finishes so subsequent epochs
+        # start clean.
+        self.start_iters_within_epoch = 0
 
         # self.setup_seeds()
         self.setup_output_dir()
@@ -323,6 +330,27 @@ class RunnerBase:
         return self.config.run_cfg.get("resume_ckpt_path", None)
 
     @property
+    def save_every_n_steps(self):
+        """Save a mid-epoch checkpoint every N optimizer steps.
+
+        ``0`` (default) disables intra-epoch saves. The mid-epoch file is
+        named ``checkpoint_ep<E>_iter<I>.pth`` next to the per-epoch files;
+        ``REASON3D_RESUME_CKPT`` can point at it to resume from that exact
+        step (uses the ``iters`` field in the checkpoint dict).
+        """
+        return int(self.config.run_cfg.get("save_every_n_steps", 0))
+
+    @property
+    def save_before_eval(self):
+        """Save the per-epoch checkpoint *before* running validation.
+
+        Defaults to ``True`` (safer: an OOM during eval will not lose the
+        epoch's weights). Set ``run.save_before_eval=false`` to revert to the
+        legacy order ``train -> eval -> save``.
+        """
+        return bool(self.config.run_cfg.get("save_before_eval", True))
+
+    @property
     def train_loader(self):
         train_dataloader = self.dataloaders["train"]
 
@@ -360,6 +388,14 @@ class RunnerBase:
                 logging.info("Start training")
                 train_stats = self.train_epoch(cur_epoch)
                 self.log_stats(split_name="train", stats=train_stats)
+                # Mid-epoch resume only applies to the first epoch after load.
+                self.start_iters_within_epoch = 0
+
+            # Save the epoch-end checkpoint BEFORE eval by default so an OOM
+            # in eval cannot lose the just-trained weights. Toggle the order
+            # back to ``train -> eval -> save`` with ``run.save_before_eval=false``.
+            if not self.evaluate_only and self.save_before_eval:
+                self._save_checkpoint(cur_epoch, is_best=False)
 
             # evaluation phase
             if len(self.valid_splits) > 0:
@@ -368,7 +404,8 @@ class RunnerBase:
 
                     val_log = self.eval_epoch(split_name=split_name, cur_epoch=cur_epoch)
 
-            self._save_checkpoint(cur_epoch, is_best=False)
+            if not self.evaluate_only and not self.save_before_eval:
+                self._save_checkpoint(cur_epoch, is_best=False)
 
             if self.evaluate_only:
                 break
@@ -394,6 +431,16 @@ class RunnerBase:
         # train
         self.model.train()
 
+        # Wire intra-epoch saves through to BaseTask._train_inner_loop. With
+        # save_every_n_steps == 0 (default) the callback is never called, so
+        # legacy callers see no behavior change.
+        save_every_n_steps = self.save_every_n_steps
+        save_callback = (
+            (lambda cur_iters: self._save_checkpoint(epoch, is_best=False, cur_iters=cur_iters))
+            if save_every_n_steps > 0
+            else None
+        )
+
         return self.task.train_epoch(
             epoch=epoch,
             model=self.model,
@@ -404,6 +451,9 @@ class RunnerBase:
             cuda_enabled=self.cuda_enabled,
             log_freq=self.log_freq,
             accum_grad_iters=self.accum_grad_iters,
+            save_every_n_steps=save_every_n_steps,
+            save_callback=save_callback,
+            start_iters_within_epoch=self.start_iters_within_epoch,
         )
 
     @torch.no_grad()
@@ -533,9 +583,15 @@ class RunnerBase:
         return loaders
 
     @main_process
-    def _save_checkpoint(self, cur_epoch, is_best=False):
+    def _save_checkpoint(self, cur_epoch, is_best=False, cur_iters=None):
         """
-        Save the checkpoint at the current epoch.
+        Save the checkpoint at the current epoch (and optionally at a
+        mid-epoch step when ``cur_iters`` is provided).
+
+        Filenames:
+          - ``checkpoint_<E>.pth`` (per-epoch, ``cur_iters is None``)
+          - ``checkpoint_ep<E>_iter<I>.pth`` (mid-epoch, ``cur_iters=I``)
+          - ``checkpoint_best.pth`` (best, only when called by ``RunnerIter``)
         """
         model_no_ddp = self.unwrap_dist_model(self.model)
         param_grad_dic = {k: v.requires_grad for (k, v) in model_no_ddp.named_parameters()}
@@ -551,13 +607,20 @@ class RunnerBase:
             "scaler": self.scaler.state_dict() if self.scaler else None,
             "epoch": cur_epoch,
         }
-        save_to = os.path.join(
-            self.output_dir,
-            "checkpoint_{}.pth".format("best" if is_best else cur_epoch),
-        )
-        logging.info("Saving checkpoint at epoch {} to {}.".format(cur_epoch, save_to))
-        #torch.save(save_obj, save_to)
-        #if cur_epoch >= 49:
+        if cur_iters is not None:
+            save_obj["iters"] = int(cur_iters)
+            filename = "checkpoint_ep{:04d}_iter{:08d}.pth".format(int(cur_epoch), int(cur_iters))
+        else:
+            filename = "checkpoint_{}.pth".format("best" if is_best else cur_epoch)
+        save_to = os.path.join(self.output_dir, filename)
+        if cur_iters is not None:
+            logging.info(
+                "Saving mid-epoch checkpoint at epoch {} iter {} to {}.".format(
+                    cur_epoch, cur_iters, save_to
+                )
+            )
+        else:
+            logging.info("Saving checkpoint at epoch {} to {}.".format(cur_epoch, save_to))
         torch.save(save_obj, save_to)
 
 
@@ -583,7 +646,11 @@ class RunnerBase:
 
     def _load_checkpoint(self, url_or_filename):
         """
-        Resume from a checkpoint.
+        Resume from a checkpoint. Supports both the canonical per-epoch
+        checkpoints (``checkpoint["epoch"]``, resume at epoch+1) and the
+        new mid-epoch checkpoints written by ``save_every_n_steps``
+        (``checkpoint["epoch"]`` + ``checkpoint["iters"]``, resume at the
+        same epoch starting from iter+1).
         """
         if is_url(url_or_filename):
             cached_file = download_cached_file(url_or_filename, check_hash=False, progress=True)
@@ -600,8 +667,18 @@ class RunnerBase:
         if self.scaler and "scaler" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler"])
 
-        self.start_epoch = checkpoint["epoch"] + 1
-        logging.info("Resume checkpoint from {}".format(url_or_filename))
+        if "iters" in checkpoint and checkpoint["iters"] is not None:
+            self.start_epoch = int(checkpoint["epoch"])
+            self.start_iters_within_epoch = int(checkpoint["iters"]) + 1
+            logging.info(
+                "Resume mid-epoch checkpoint from {} (epoch={}, next_iter={}).".format(
+                    url_or_filename, self.start_epoch, self.start_iters_within_epoch
+                )
+            )
+        else:
+            self.start_epoch = int(checkpoint["epoch"]) + 1
+            self.start_iters_within_epoch = 0
+            logging.info("Resume checkpoint from {}".format(url_or_filename))
 
     @main_process
     def log_stats(self, stats, split_name):

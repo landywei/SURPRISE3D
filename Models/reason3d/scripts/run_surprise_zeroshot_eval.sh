@@ -3,9 +3,12 @@
 # Requires pointgroup_ops: run scripts/build_pointgroup_ops.sh once per conda env.
 #
 # Variants (set CFG= to match your checkpoint):
-#   bare:  lavis/projects/reason3d/val/reason3d_surprise_zeroshot.yaml (default)
-#   geo:   lavis/projects/reason3d/val/reason3d_surprise_zeroshot_geo.yaml
-#   chain: lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chain.yaml
+#   bare:    lavis/projects/reason3d/val/reason3d_surprise_zeroshot.yaml (default)
+#   geo:     lavis/projects/reason3d/val/reason3d_surprise_zeroshot_geo.yaml
+#   chain:   lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chain.yaml
+#   chainv3: lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chainv3.yaml
+#            (uses task 3d_refer_seg_v3, builder 3d_refer_chainv3, model arch reason3d_t5_chainv3;
+#             reports per-instance hit@0.25 / hit@0.50 / meanMaxIoU)
 #
 # JSONL without mask .npz (default when saving preds from this script):
 #   REASON3D_SAVE_PREDS=1   # qualitative/predictions.jsonl
@@ -72,6 +75,9 @@ if [[ -n "${REASON3D_PTH_SUBDIR:-}" ]]; then
     *zeroshot_chain.yaml|*small_chain.yaml)
       OPTS+=( "datasets.3d_refer_chain.dataset_init.pth_rel_subdir=${REASON3D_PTH_SUBDIR}" )
       ;;
+    *zeroshot_chainv3.yaml)
+      OPTS+=( "datasets.3d_refer_chainv3.dataset_init.pth_rel_subdir=${REASON3D_PTH_SUBDIR}" )
+      ;;
     *)
       OPTS+=( "datasets.3d_refer.dataset_init.pth_rel_subdir=${REASON3D_PTH_SUBDIR}" )
       ;;
@@ -84,6 +90,9 @@ if [[ -n "${REASON3D_PTS_ROOT:-}" ]]; then
       ;;
     *zeroshot_chain.yaml|*small_chain.yaml)
       OPTS+=( "datasets.3d_refer_chain.build_info.points.storage=${REASON3D_PTS_ROOT}" )
+      ;;
+    *zeroshot_chainv3.yaml)
+      OPTS+=( "datasets.3d_refer_chainv3.build_info.points.storage=${REASON3D_PTS_ROOT}" )
       ;;
     *)
       OPTS+=( "datasets.3d_refer.build_info.points.storage=${REASON3D_PTS_ROOT}" )
@@ -98,6 +107,9 @@ if [[ "${REASON3D_FILTER_MISSING_GT_IN_PTH:-1}" == "0" ]]; then
     *zeroshot_chain.yaml|*small_chain.yaml)
       OPTS+=( "datasets.3d_refer_chain.dataset_init.filter_missing_gt_in_pth=false" )
       ;;
+    *zeroshot_chainv3.yaml)
+      OPTS+=( "datasets.3d_refer_chainv3.dataset_init.filter_missing_gt_in_pth=false" )
+      ;;
     *)
       OPTS+=( "datasets.3d_refer.dataset_init.filter_missing_gt_in_pth=false" )
       ;;
@@ -109,6 +121,9 @@ else
       ;;
     *zeroshot_chain.yaml|*small_chain.yaml)
       OPTS+=( "datasets.3d_refer_chain.dataset_init.filter_missing_gt_in_pth=true" )
+      ;;
+    *zeroshot_chainv3.yaml)
+      OPTS+=( "datasets.3d_refer_chainv3.dataset_init.filter_missing_gt_in_pth=true" )
       ;;
     *)
       OPTS+=( "datasets.3d_refer.dataset_init.filter_missing_gt_in_pth=true" )

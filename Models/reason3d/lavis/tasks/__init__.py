@@ -8,6 +8,7 @@
 from lavis.common.registry import registry
 from lavis.tasks.base_task import BaseTask
 from lavis.tasks.refer_seg_task import ThreeDReferSegTask
+from lavis.tasks.refer_seg_task_v3 import ThreeDReferSegTaskV3  # registers 3d_refer_seg_v3
 
 def setup_task(cfg):
     assert "task" in cfg.run_cfg, "Task name must be provided."
@@ -20,4 +21,5 @@ def setup_task(cfg):
 __all__ = [
     "BaseTask",
     "ThreeDReferSegTask",
+    "ThreeDReferSegTaskV3",
 ]
