@@ -32,11 +32,6 @@ stack of three orthogonal structural fixes on top of the
 the full LaTeX report that explains why each fix exists, what failure mode it
 targets, and what it buys empirically.
 
-The deliverable is a single document:
-[`report/main_v2.tex`](report/main_v2.tex) (compiles to a CVPR-style PDF) —
-the rest of the repository is the code, configs, and scripts that produce the
-numbers, ablations, and qualitative figures in that report.
-
 ---
 
 ## TL;DR — three structural fixes
@@ -334,23 +329,6 @@ without the upstream dataset and benchmark there is nothing to do:
   year      = {2025}
 }
 ```
-
-For the contributions of this fork (per-instance metrics, CriterionV3,
-Chain v3 CoT) please reference the report PDF in this repository:
-
-```bibtex
-@techreport{wei2026chainv3cot,
-  title       = {Chain-of-Thought Segmentation for Name-Free
-                 Multi-Reference 3D Queries},
-  author      = {Wei, Lan},
-  institution = {MBZUAI},
-  type        = {Course final-project report},
-  year        = {2026},
-  note        = {Draft v2; \texttt{report/main\_v2.tex} in
-                 \url{https://github.com/<this-fork>/SURPRISE3D}}
-}
-```
-
 ---
 
 ## Contact
