@@ -1,233 +1,325 @@
 <div align="center">
 
-# Surprise3D: A Dataset for Spatial Understanding and Reasoning in Complex 3D Scenes
+# Chain-of-Thought Segmentation for Name-Free Multi-Reference 3D Queries
 
-### NeurIPS 2025 (Datasets & Benchmarks Track)
+*Course-project fork of [SURPRISE3D](https://github.com/liziwennba/SURPRISE3D) ·
+Reason3D baseline + three structural fixes for name-free 3D referring
+segmentation*
 
-<p align="center"><em>Course final-project fork — Reason3D experiments & tooling; upstream dataset/paper unchanged.</em></p>
+**Lan Wei** &nbsp;·&nbsp; `lan.wei@mbzuai.ac.ae` &nbsp;·&nbsp; MBZUAI &nbsp;·&nbsp; Draft v2 — May 2026
 
-**Jiaxin Huang**<sup>1,2</sup>, **Ziwen Li**<sup>3</sup>, **Hanlue Zhang**<sup>3</sup>, **Runnan Chen**<sup>1</sup>, **Zhengqing Gao**<sup>4</sup>, **Xiao He**<sup>2</sup>, **Yandong Guo**<sup>2</sup>, **Wenping Wang**<sup>4</sup>, **Tongliang Liu**<sup>3&dagger;</sup>, **Mingming Gong**<sup>5&dagger;</sup>
-
-<sup>1</sup>MBZUAI &nbsp; <sup>2</sup>AI2Robotics &nbsp; <sup>3</sup>The University of Sydney &nbsp; <sup>4</sup>Texas A&M University &nbsp; <sup>5</sup>The University of Melbourne
-
-<sup>&dagger;</sup>Corresponding authors
-
-[![Paper](https://img.shields.io/badge/arXiv-2507.07781-b31b1b?logo=arxiv)](https://arxiv.org/abs/2507.07781)
-[![HuggingFace](https://img.shields.io/badge/🤗_HuggingFace-Dataset-blue)](https://huggingface.co/datasets/hhllzz/surprise-3d)
-[![Project Page](https://img.shields.io/badge/Project-Page-4c8dae)](https://liziwennba.github.io/SURPRISE3D)
-[![NeurIPS](https://img.shields.io/badge/NeurIPS-2025-7c3aed)](https://neurips.cc)
-[![MLLM-For3D](https://img.shields.io/badge/Companion-MLLM--For3D-green)](https://github.com/tmllab/2025_NeurIPS_MLLM-For3D)
+[![Report](https://img.shields.io/badge/Report-main__v2.tex-orange)](report/main_v2.tex)
+[![Upstream dataset](https://img.shields.io/badge/Upstream-SURPRISE3D-blue)](https://github.com/liziwennba/SURPRISE3D)
+[![Reason3D baseline](https://img.shields.io/badge/Baseline-Reason3D-green)](https://github.com/KuanchihHuang/Reason3D)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/liziwennba/SURPRISE3D?style=social)](https://github.com/liziwennba/SURPRISE3D)
-
-<p>
-<a href="assets/MBZUAI.png"><img src="assets/MBZUAI.png" height="50" alt="MBZUAI"></a>&nbsp;&nbsp;
-<a href="assets/ai2robotics.png"><img src="assets/ai2robotics.png" height="50" alt="AI2Robotics"></a>&nbsp;&nbsp;
-<a href="assets/sydney.jpg"><img src="assets/sydney.jpg" height="50" alt="USyd"></a>&nbsp;&nbsp;
-<a href="assets/texasa&muniversity.jpg"><img src="assets/texasa&muniversity.jpg" height="50" alt="Texas A&M"></a>&nbsp;&nbsp;
-<a href="assets/Melbourne.png"><img src="assets/Melbourne.png" height="50" alt="UMelb"></a>
-</p>
 
 </div>
 
 ---
 
-## About this repository
+## What this repository is
 
-This repository is a **final-course-project fork** of the public [**SURPRISE3D**](https://github.com/liziwennba/SURPRISE3D) release. Everything in the banner above describes the **original benchmark and paper** (NeurIPS 2025 Datasets & Benchmarks). **Upstream** remains the canonical source for the dataset, project page, and citation.
+This is a **final-course-project fork** of the public
+[SURPRISE3D](https://github.com/liziwennba/SURPRISE3D) release (NeurIPS 2025
+Datasets & Benchmarks Track). The dataset, project page, and benchmark
+citation belong to the upstream repository and paper — see
+[Acknowledgements](#acknowledgements--upstream).
 
-**What this fork adds** is engineering around the **Reason3D** baseline on Surprise3D: reproducible training and evaluation scripts (`Models/reason3d/scripts/`), configuration variants (**geo**, **chain**, and related YAMLs), and developer notes (`Models/reason3d/docs/`). Those extensions support the experiments written up for the course.
+The **engineering and writing in this fork** are mine. The contribution is a
+stack of three orthogonal structural fixes on top of the
+[Reason3D](https://github.com/KuanchihHuang/Reason3D) baseline for
+**name-free 3D Spatial Reasoning Segmentation (3D-SRS)** on Surprise3D, plus
+the full LaTeX report that explains why each fix exists, what failure mode it
+targets, and what it buys empirically.
 
-**Final report companion:** aggregated metrics (small zeroshot split, aligned finetune checkpoints, bare vs. chain comparison) and command patterns are summarized in **`report/surprise3d_results_comparison.md`** — supplied with the **course submission** alongside this README; that folder is intentionally **not** tracked in git here.
-
----
-
-## TL;DR
-
-The **Surprise3D** benchmark is a large-scale dataset for evaluating **language-guided spatial reasoning segmentation** in 3D scenes. Unlike many existing datasets, its spatial queries **avoid naming the target object** so models cannot rely on semantic shortcuts.
-
-| | Surprise3D |
-|:--|:--|
-| 🏠 Scenes | 900+ indoor scenes (ScanNet++ v2) |
-| 💬 Queries | 200k+ vision-language pairs |
-| ✍️ Human annotations | 89k+ spatial queries (no object names) |
-| 🏷️ Object classes | 2,800+ unique classes |
-| 🧠 Reasoning types | Relative position · Narrative perspective · Parametric perspective · Absolute distance |
-
-> 🔗 **Companion method**: [**MLLM-For3D**](https://github.com/tmllab/2025_NeurIPS_MLLM-For3D) — adapts 2D MLLMs for label-free 3D reasoning segmentation (NeurIPS 2025). [[Paper]](https://arxiv.org/abs/2503.18135)
+The deliverable is a single document:
+[`report/main_v2.tex`](report/main_v2.tex) (compiles to a CVPR-style PDF) —
+the rest of the repository is the code, configs, and scripts that produce the
+numbers, ablations, and qualitative figures in that report.
 
 ---
 
-## Why Surprise3D?
+## TL;DR — three structural fixes
 
-Current 3D vision-language datasets often allow **semantic shortcuts** — models match object names in queries instead of reasoning about spatial relationships. The Surprise3D paper shows that strong multimodal models can **drop to near-zero accuracy** on pure spatial reasoning under that setting.
+The dominant single-`[SEG]` recipe for LM-driven 3D referring segmentation
+collapses three structurally distinct sub-problems — **selecting matching
+instance(s)**, **supervising small instances**, and **resolving multi-step
+relational structure** — into one bottleneck. Each fix targets one of those.
 
-The benchmark addresses this by:
-1. Crafting queries that describe spatial relationships **without naming the target object**
-2. Covering four distinct spatial reasoning skills with human-written queries
-3. Providing a standardized 3D Spatial Reasoning Segmentation (3D-SRS) benchmark
+1. **Per-instance evaluation protocol** — `meanMaxIoU` and hit$@\tau$.
+   Scores selective multi-target predictions correctly and exposes the
+   `mIoU > meanMaxIoU` gap that aggregated union-IoU hides.
+   *Code:* [`Models/reason3d/lavis/tasks/refer_seg_task_v3.py`](Models/reason3d/lavis/tasks/refer_seg_task_v3.py)
 
-### Spatial Reasoning Types
+2. **CriterionV3** — drop-in segmentation criterion with best-of-set
+   BCE+Dice, coverage hinge, size-normalized dice, and optional
+   Lovász-boundary + sigmoid-focal auxiliaries on a small-instance subset.
+   Architecture-preserving, replaces the Reason3D loss only.
+   *Code:* [`Models/reason3d/lavis/models/reason3d_models/seg_loss_v3.py`](Models/reason3d/lavis/models/reason3d_models/seg_loss_v3.py)
 
-| Type | Example Query |
-|:--|:--|
-| **Relative Position** | *"Find the object behind the chair"* |
-| **Narrative Perspective** | *"Locate the object visible from the sofa"* |
-| **Parametric Perspective** | *"Select the object 2 meters to the left of the table"* |
-| **Absolute Distance** | *"Identify the object exactly 3 meters in front of you"* |
-
----
-
-## Annotation Pipeline
-
-Surprise3D is built through **two complementary annotation pipelines**:
-
-### 1. Spatial Annotation (Human)
-
-![Spatial Annotation Pipeline](assets/spatial_annotation_pipline%20(1).pdf)
-
-Volunteers follow a 3-step process: (1) select a 3D scene, (2) write spatial descriptions under two situations — *Situation 1*: describe orientation and object position relative to a viewpoint (narrative/parametric perspective); *Situation 2*: describe spatial relationships between objects (relative position, absolute distance), and (3) verify the correct target objects in the 3D scene.
-
-### 2. Automatic Pipeline (LLM + Human Verification)
-
-![Automatic Pipeline](assets/automatic_pipeline%20(1).png)
-
-For knowledge-based queries (common sense, human intention): an LLM generates initial Q&A pairs from scene metadata, then automated quality control with human-in-the-loop verification identifies and corrects problematic queries.
+3. **Chain v3 CoT** — multi-step architectural extension. The LM emits an
+   intermediate landmark `[SEG]`, the mass-pooled landmark superpoint
+   feature is appended to the encoder memory, and a second `[SEG]` decodes
+   the final target mask. Unlike the closest precedent (R2S), Chain v3 needs
+   **no LLM-mined intermediate-mask GT** — the landmark mask is shaped only
+   by the pretrained class-segmentation prior and the chain-of-thought
+   language-modelling signal (a **W1-pure** regime).
+   *Code:* [`Models/reason3d/lavis/models/reason3d_models/reason3d_t5_chainv3_cot.py`](Models/reason3d/lavis/models/reason3d_models/reason3d_t5_chainv3_cot.py)
 
 ---
 
-## Data Analysis
+## Headline numbers (Surprise3D val)
 
-![Data Analysis](assets/data_analysis.png)
+Numbers reproduced from `report/main_v2.tex` Table 2 (full table including
+per-question-type breakdown lives in §6 / Appendix A of the report). All
+percentages.
 
-Balanced coverage across reasoning types with augmentation for low-frequency objects to reduce bias.
+| Method | mIoU | A$_{25}$ | A$_{50}$ | meanMaxIoU | hit$@0.25$ | hit$@0.50$ |
+|:--|:--:|:--:|:--:|:--:|:--:|:--:|
+| Reason3D (vanilla)               | 22.95 | 35.41 | 20.79 | 21.87 | **34.37** | 17.83 |
+| &nbsp;&nbsp; + CriterionV3       | 20.54 | 31.32 | 17.95 | **22.43** | 34.00 | 19.75 |
+| &nbsp;&nbsp; + Chain v3 CoT (W1-pure) | 19.87 | 30.53 | 17.34 | 22.40 | **34.37** | **20.94** |
 
----
+- Vanilla `mIoU > meanMaxIoU` (22.95 > 21.87) is the signature of a model
+  that *spreads* its prediction across multi-target referents instead of
+  committing to one.
+- CriterionV3 reverses this direction (20.54 < 22.43); per-instance
+  hit$@0.50$ rises +1.92pt while union $A_{50}$ falls −2.84pt — the
+  intentional per-instance ↔ union trade-off.
+- Chain v3 CoT pushes hit$@0.50$ to **20.94** (+3.11pt over vanilla) and
+  flips the per-instance gap $\Delta_{50}\!=\!\textsc{hit}@0.50\!-\!A_{50}$
+  from −2.96pt on vanilla to **+3.60pt**.
 
-## Quick Start
-
-### Step 1: Download Annotations
-
-```python
-# Option A: Via HuggingFace datasets library
-from datasets import load_dataset
-dataset = load_dataset("hhllzz/surprise-3d")
-```
-
-Or download directly: [🤗 HuggingFace — hhllzz/surprise-3d](https://huggingface.co/datasets/hhllzz/surprise-3d)
-
-**Dataset splits**: Train (180k rows) · Validation (10.2k rows)
-
-**Fields**: `object_id`, `object_name`, `description`, `scene_id`, `question_type`, `reference_id`
-
-### Step 2: Download ScanNet++ Point Clouds
-
-Surprise3D annotations are built on [ScanNet++ v2](https://kaldir.vc.in.tum.de/scannetpp/). You need to request access and download the 3D scene data separately.
-
-### Step 3: Preprocess for Training
-
-```bash
-# Clone this fork (use your course or personal remote URL)
-git clone <YOUR_REPO_URL>
-cd SURPRISE3D
-```
-
-Surprise3D uses **ScanNet++** meshes/point clouds plus the Hugging Face JSON annotations. The Reason3D baseline expects processed `.pth` scenes (including superpoints): follow **Models/reason3d/README.md** (ScanNet++ semantics prep, `update_superpoints.py`, annotation file layout). Optional helpers under **Models/reason3d/scripts/** include `run_prepare_surprise_scannetpp_pth.sh` for preparing Surprise-aligned `.pth` layouts; see **Models/reason3d/docs/finetune_eval_scripts.md** for how finetune/eval scripts wire paths and configs.
-
-### Step 4: Train & Evaluate Baselines
-
-This fork ships modified baseline implementations adapted for Surprise3D (same spirit as upstream tooling):
-
-**Reason3D** (3D reasoning segmentation):
-```bash
-cd Models/reason3d
-# One-time: CUDA ops for the segmentor stack
-bash scripts/build_pointgroup_ops.sh
-
-# Finetune on Surprise3D (default: reason3d_surprise_finetune.yaml). Set paths for
-# your ScanNet++ tree, .pth subdir, and init checkpoint — see README + docs above.
-REASON3D_INIT_CKPT=/path/to/reason3d_pretrained.pth bash scripts/run_surprise_finetune.sh
-
-# Zero-shot / checkpoint evaluation on the val split
-REASON3D_CKPT=/path/to/your_checkpoint.pth bash scripts/run_surprise_zeroshot_eval.sh
-```
-
-Alternative configs (scratch training on other YAMLs, geometry-aware **geo**, chain-of-thought **chain** variants, small smoke evals) are listed in **Models/reason3d/docs/finetune_eval_scripts.md**. For the original Reason3D ScanRefer-style recipe only:
-```bash
-python -m torch.distributed.run --nproc_per_node=4 train.py \
-  --cfg-path lavis/projects/reason3d/train/reason3d_scanrefer_scratch.yaml
-```
-
-**Intent3D** (intention-based 3D grounding):
-```bash
-cd Models/intent3d
-# See Models/intent3d/README.md for full setup
-conda env create -f environment.yml --name Intent3D
-sh scripts/train_scanintend.sh
-```
-
-See individual READMEs under [Models/](Models/) for detailed instructions.
+The joint `CriterionV3 ⊕ Chain v3 CoT` configuration was not run under the
+compute budget and is documented as deferred future work in the report's
+limitations section.
 
 ---
 
-## Benchmark Results (3D-SRS)
-
-Official numbers for multiple methods appear in [arXiv:2507.07781](https://arxiv.org/abs/2507.07781). The placeholder table below mirrors the paper-style layout; fill from the publication for reporting.
-
-For **Reason3D experiments in this fork** (small eval split, bare vs. geo vs. chain, aligned checkpoint protocol), see the companion summary in **`report/surprise3d_results_comparison.md`** in your submission bundle.
-
-Baseline methods evaluated on Surprise3D under the 3D Spatial Reasoning Segmentation protocol:
-
-### Zero-shot Evaluation
-
-| Method | mIoU | Acc@0.25 | Acc@0.50 |
-|:--|:--:|:--:|:--:|
-| 3D-Vista | — | — | — |
-| ChatScene | — | — | — |
-| MLLM-For3D | — | — | — |
-
-### Fine-tuned on Surprise3D
-
-| Method | mIoU | Acc@0.25 | Acc@0.50 |
-|:--|:--:|:--:|:--:|
-| Intent3D | — | — | — |
-| Reason3D | — | — | — |
-| **MLLM-For3D** | **—** | **—** | **—** |
-
-<!-- TODO: Fill in exact numbers from arXiv:2507.07781 Table 1 & 2 -->
-
----
-
-## Code Structure
+## Repository layout
 
 ```
 SURPRISE3D/
+├── report/                                  # CVPR-style report (compile main_v2.tex)
+│   ├── main_v2.tex                          # ← the deliverable
+│   ├── main.bib  preamble.tex  cvpr.sty
+│   ├── fig/                                 # teaser, chain v3 arch, qualitative panels
+│   ├── surprise3d_results_comparison.md     # cross-run comparison
+│   ├── surprise100_attribution_analysis.md  # 100-sample error attribution
+│   └── surprise100_error_attribution.csv
+│
 ├── Models/
-│   ├── reason3d/            # Modified Reason3D for Surprise3D training/eval
-│   │   ├── lavis/           # Configs, datasets, models (incl. geo / chain variants)
-│   │   ├── scripts/         # run_surprise_finetune.sh, zeroshot eval wrappers, etc.
-│   │   ├── docs/            # finetune_eval_scripts.md, architecture notes
-│   │   ├── train.py         # Distributed training script
-│   │   ├── evaluate.py      # Evaluation script
-│   │   ├── visualize.py     # Visualization of predictions
-│   │   └── update_superpoints.py
-│   └── intent3d/            # Modified Intent3D baseline
-│       ├── train_dist_mod.py
-│       ├── prepare_data.py
-│       └── environment.yml
-├── assets/                  # Figures, logos, data analysis plots
-│   ├── task.png             # Task overview figure
-│   ├── data_analysis.png    # Dataset statistics
-│   └── automatic_pipeline (1).png  # Annotation pipeline
-├── LICENSE                  # MIT License
-└── README.md
+│   ├── reason3d/                            # ← the active codebase for this fork
+│   │   ├── lavis/
+│   │   │   ├── models/reason3d_models/
+│   │   │   │   ├── reason3d_t5.py                # vanilla baseline
+│   │   │   │   ├── reason3d_t5_chainv3.py        # chain v3 architecture (single-pass)
+│   │   │   │   ├── reason3d_t5_chainv3_cot.py    # ← Chain v3 CoT (two-pass + mass-pool)
+│   │   │   │   ├── seg_loss.py                   # legacy loss
+│   │   │   │   └── seg_loss_v3.py                # ← CriterionV3
+│   │   │   ├── tasks/
+│   │   │   │   ├── refer_seg_task.py             # union-IoU only
+│   │   │   │   └── refer_seg_task_v3.py          # ← per-instance metrics
+│   │   │   └── projects/reason3d/train/
+│   │   │       ├── reason3d_surprise_finetune.yaml
+│   │   │       ├── reason3d_surprise_finetune_v2.yaml
+│   │   │       ├── reason3d_surprise_finetune_chainv3.yaml
+│   │   │       └── reason3d_surprise_finetune_chainv3_cot.yaml
+│   │   ├── scripts/
+│   │   │   ├── run_surprise_finetune*.sh         # finetune launchers
+│   │   │   ├── run_surprise_zeroshot_eval*.sh    # eval launchers
+│   │   │   ├── summarize_surprise_predictions.py # per-question-type analysis
+│   │   │   ├── recover_surprise_question_types.py# join predictions ↔ surprise_val.json
+│   │   │   ├── visualize_qualitative_preds.py    # PLY / mask visualization
+│   │   │   └── architecture_reason3d_*.py        # architecture diagrams
+│   │   └── docs/                                  # design-space + ablation notes
+│   │       ├── chainv3_cot_design_space.md
+│   │       ├── chainv3_cot_ablation_tracker.md
+│   │       ├── chainv3_cot_literature_review.md
+│   │       ├── finetune_eval_scripts.md          # script-by-script reference
+│   │       ├── REASON3D_FORK_CHANGES.md
+│   │       └── REASON3D_PROBLEMS_AND_FIXES.md
+│   └── intent3d/                            # second baseline (Intent3D, less central)
+│
+├── third_party/                             # scannetpp, unidet3d (vendored)
+└── README.md                                # this file
 ```
+
+For a script-by-script breakdown of every finetune / eval entry point,
+required env vars, and YAML default, read
+[`Models/reason3d/docs/finetune_eval_scripts.md`](Models/reason3d/docs/finetune_eval_scripts.md).
 
 ---
 
-## Citation
+## Reproducing the report
 
-If you use Surprise3D in your research, please cite:
+### 0. Environment
+
+A reproducible setup script for the Reason3D stack lives at
+[`Models/reason3d/scripts/install_reason3d_deps.sh`](Models/reason3d/scripts/install_reason3d_deps.sh)
+and a reference snapshot at
+[`Models/reason3d/docs/ENVIRONMENT.md`](Models/reason3d/docs/ENVIRONMENT.md).
+You'll also need PointGroup CUDA ops:
+
+```bash
+cd Models/reason3d
+bash scripts/build_pointgroup_ops.sh
+```
+
+### 1. Data
+
+- **Annotations** — Surprise3D (NeurIPS 2025) from
+  [HuggingFace `hhllzz/surprise-3d`](https://huggingface.co/datasets/hhllzz/surprise-3d).
+  Default expected at `/nfs-stor/lan.wei/data/annotations/surprise_val.json`
+  by the analysis scripts; pass `--ann <path>` to override.
+- **Point clouds** — ScanNet++ v2 (request access from
+  [kaldir.vc.in.tum.de/scannetpp](https://kaldir.vc.in.tum.de/scannetpp/)).
+- **Preprocessing to `.pth`** — Reason3D consumes per-scene `.pth` files
+  with superpoints. Use:
+  ```bash
+  cd Models/reason3d
+  bash scripts/run_prepare_surprise_scannetpp_pth.sh
+  ```
+  Path conventions live in
+  [`Models/reason3d/docs/DATA_SYNC.md`](Models/reason3d/docs/DATA_SYNC.md);
+  the default subdirectory `processed_surprise_full_pth` is hard-wired in
+  the YAMLs under `lavis/configs/datasets/3dseg/`.
+
+### 2. Train
+
+Each row in the headline table corresponds to one finetune launcher. Set
+`REASON3D_INIT_CKPT` to a Reason3D `.pth` checkpoint and (optionally)
+`NPROC` for multi-GPU.
+
+| Row in Table 2 | Launcher | Config |
+|:--|:--|:--|
+| Reason3D (vanilla) | `scripts/run_surprise_finetune.sh` | `reason3d_surprise_finetune.yaml` |
+| + CriterionV3 (on chain v3 stack) | `scripts/run_surprise_finetune_chainv3.sh` | `reason3d_surprise_finetune_chainv3.yaml` |
+| + Chain v3 CoT (W1-pure) | `scripts/run_surprise_finetune_chainv3_cot.sh` | `reason3d_surprise_finetune_chainv3_cot.yaml` |
+
+```bash
+cd Models/reason3d
+REASON3D_INIT_CKPT=/path/to/reason3d_pretrained.pth NPROC=4 \
+    bash scripts/run_surprise_finetune_chainv3_cot.sh
+```
+
+### 3. Evaluate (zero-shot or from a checkpoint)
+
+```bash
+cd Models/reason3d
+REASON3D_CKPT=/path/to/your_checkpoint.pth \
+    bash scripts/run_surprise_zeroshot_eval.sh
+```
+
+This writes `metrics_v3_test.json` plus
+`qualitative/predictions.jsonl` (one row per query, including chain v3
+fields: `decoded_text_pass1`, `intermediate_point_iou`, `did_two_pass`).
+
+### 4. Per-question-type analysis
+
+The JSONL ships with empty `question_type` by design; recover it by joining
+to `surprise_val.json`:
+
+```bash
+cd Models/reason3d
+python3 scripts/summarize_surprise_predictions.py \
+    --markdown-per-qt --transpose \
+    --ann /nfs-stor/lan.wei/data/annotations/surprise_val.json \
+    /path/to/run/qualitative/predictions.jsonl
+```
+
+This prints the per-family table in §6.2 and Appendix A of the report
+(rows = metric, columns = `cs / hi / first_view / relative_position / abs /
+camera_view / TOTAL`). Add a second JSONL and `--markdown-cross
+--highlight-max` to produce the cross-variant ablation tables.
+
+### 5. Qualitative figures
+
+```bash
+cd Models/reason3d
+bash scripts/run_visualize_qualitative.sh
+```
+
+Wraps `scripts/visualize_qualitative_preds.py` to render the predicted /
+intermediate / GT masks as colour-coded PLYs and PNG snapshots. The
+qualitative panels in `report/fig/` (`qual_relational.png`,
+`qual_small.png`) were produced from the chain v3 CoT run at
+`reason3d_surprise_zeroshot_chainv3_cot/20260506110758/`.
+
+### 6. Compile the report
+
+```bash
+cd report
+pdflatex main_v2 && bibtex main_v2 && pdflatex main_v2 && pdflatex main_v2
+```
+
+`main_v2.tex` uses CVPR's `cvpr.sty` (vendored locally) and the
+`figincl{file}{caption}` helper that falls back to a labelled placeholder
+box if a figure file is missing — so the document compiles cleanly
+mid-edit even when `fig/*.png` is incomplete.
+
+---
+
+## Where each report claim lives in the code
+
+| Report § | Claim | Code |
+|:--|:--|:--|
+| §3 | Per-instance metrics (`meanMaxIoU`, hit$@\tau$) | `lavis/tasks/refer_seg_task_v3.py` |
+| §4.1 | Failure mode 1: union-mask spread | `seg_loss.py` (legacy union BCE+Dice) |
+| §4.2 | CriterionV3: best-of-set + coverage hinge + sized dice | `lavis/models/reason3d_models/seg_loss_v3.py` |
+| §4.3 | Chain v3 CoT mass-pool feedback, two-pass forward | `lavis/models/reason3d_models/reason3d_t5_chainv3_cot.py` |
+| §4.3 | W1-pure regime (no $M_1$ supervision) | search for `intermediate_loss_weight` in the chainv3 CoT model |
+| §6.1 | Main results table | `scripts/summarize_surprise_predictions.py` (--markdown-cross) |
+| §6.2 + App. A | Per-question-type breakdown | `scripts/summarize_surprise_predictions.py --markdown-per-qt` |
+| App. A | Question-type recovery from `surprise_val.json` | `scripts/recover_surprise_question_types.py` (uses `scripts/surprise_pred_join.py`) |
+| App. B | Loss-grid ablations (A0…A6) | `lavis/projects/reason3d/train/reason3d_surprise_finetune_chainv3*.yaml` |
+| App. C | Chain template variants (B1…B9) | `Models/reason3d/docs/chainv3_cot_design_space.md` |
+
+---
+
+## Notes / caveats
+
+- **Sample sizes.** Vanilla and CriterionV3 rows are evaluated on
+  $n\!=\!8{,}229$ Surprise val queries; the Chain v3 CoT row is on
+  $n\!=\!8{,}225$ — the two-pass decoder drops 4 queries when it cannot
+  emit two well-formed `[SEG]`s. This is documented in the caption of
+  Table 2.
+- **The CriterionV3 row in Table 2 is on the chain v3 stack**, not on
+  vanilla Reason3D. The architecture-fixed reference (A0 = legacy
+  criterion on the same chain v3 stack) is in Appendix B's loss-grid
+  table; see Limitations in §7 of the report.
+- **`report/surprise3d_results_comparison.md`**, the older small-eval
+  cross-run summary, was the artefact accompanying the course submission
+  alongside the report PDF. The numbers in the README and report tables
+  are from the full $n\!\sim\!8{,}229$ val split, not the small subset.
+
+---
+
+## Acknowledgements & upstream
+
+- **Dataset.** All Surprise3D dataset details (queries, splits,
+  annotation pipeline, official benchmark numbers) belong to the upstream
+  paper and repository:
+  - Paper: [arXiv:2507.07781](https://arxiv.org/abs/2507.07781)
+  - Repo: <https://github.com/liziwennba/SURPRISE3D>
+  - HuggingFace: <https://huggingface.co/datasets/hhllzz/surprise-3d>
+- **Reason3D baseline.** The Reason3D code under `Models/reason3d/` is
+  forked from <https://github.com/KuanchihHuang/Reason3D>. The diff
+  introduced by this fork is summarized in
+  [`Models/reason3d/docs/REASON3D_FORK_CHANGES.md`](Models/reason3d/docs/REASON3D_FORK_CHANGES.md).
+- **Scenes.** ScanNet++ v2 (Yeshwanth et al.) provides the underlying
+  3D point clouds.
+
+The companion 2D method MLLM-For3D (Huang et al., NeurIPS 2025) is
+unrelated to this fork; see <https://github.com/tmllab/2025_NeurIPS_MLLM-For3D>
+if you need the 2D-MLLM-adaptation angle.
+
+---
+
+## Citing
+
+If anything from this fork is useful, please **cite Surprise3D first** —
+without the upstream dataset and benchmark there is nothing to do:
 
 ```bibtex
 @inproceedings{huang2025surprise3d,
@@ -241,24 +333,31 @@ If you use Surprise3D in your research, please cite:
                (NeurIPS), Datasets and Benchmarks Track},
   year      = {2025}
 }
+```
 
-@inproceedings{huang2025mllmfor3d,
-  title     = {MLLM-For3D: Adapting Multimodal Large Language Model
-               for 3D Reasoning Segmentation},
-  author    = {Huang, Jiaxin and Chen, Runnan and Li, Ziwen and
-               Gao, Zhengqing and He, Xiao and Guo, Yandong and
-               Liu, Tongliang and Gong, Mingming},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2025}
+For the contributions of this fork (per-instance metrics, CriterionV3,
+Chain v3 CoT) please reference the report PDF in this repository:
+
+```bibtex
+@techreport{wei2026chainv3cot,
+  title       = {Chain-of-Thought Segmentation for Name-Free
+                 Multi-Reference 3D Queries},
+  author      = {Wei, Lan},
+  institution = {MBZUAI},
+  type        = {Course final-project report},
+  year        = {2026},
+  note        = {Draft v2; \texttt{report/main\_v2.tex} in
+                 \url{https://github.com/<this-fork>/SURPRISE3D}}
 }
 ```
 
-## Acknowledgements
-
-We thank the authors of [Reason3D](https://github.com/KuanchihHuang/Reason3D) for their outstanding work. We also thank the [ScanNet++](https://kaldir.vc.in.tum.de/scannetpp/) team for the real 3D indoor scene data.
+---
 
 ## Contact
 
-For questions about the **Surprise3D dataset and original publication**, contact the authors listed at the top of this README.
+For questions about the **Surprise3D dataset and original publication**
+(annotations, splits, license, official benchmark protocol), contact the
+upstream authors listed in the upstream README.
 
-For questions about **this fork’s** code paths and experiments, prefer course channels or the maintainer of this repository.
+For questions about **this fork** — CriterionV3, Chain v3 CoT,
+per-instance metrics, the report — contact `lan.wei@mbzuai.ac.ae`.
