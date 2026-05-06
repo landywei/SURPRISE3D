@@ -16,10 +16,14 @@
 # builder (bare / geo / chain / chainv3) just like the full-eval script.
 #
 # Variants (set CFG= to match your checkpoint):
-#   bare:    lavis/projects/reason3d/val/reason3d_surprise_zeroshot.yaml (default)
-#   geo:     lavis/projects/reason3d/val/reason3d_surprise_zeroshot_geo.yaml
-#   chain:   lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chain.yaml
-#   chainv3: lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chainv3.yaml
+#   bare:        lavis/projects/reason3d/val/reason3d_surprise_zeroshot.yaml (default)
+#   geo:         lavis/projects/reason3d/val/reason3d_surprise_zeroshot_geo.yaml
+#   chain:       lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chain.yaml
+#   chainv3:     lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chainv3.yaml
+#   chainv3_cot: lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chainv3_cot.yaml
+#                (model arch reason3d_t5_chainv3_cot, builder 3d_refer_chainv3_cot;
+#                 two-pass predict_seg also persists the pass-1 intermediate mask
+#                 alongside pred/gt when REASON3D_SAVE_EVAL_MASKS=1)
 #
 # Quick chainv3 run on the committed 100-sample JSON:
 #   CFG=lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chainv3.yaml \
@@ -32,6 +36,11 @@
 # for 100 rows):
 #   REASON3D_SAVE_PREDS=1                    # qualitative/predictions.jsonl
 #   REASON3D_SAVE_EVAL_MASKS=1               # also qualitative/masks/*.npz
+#                                            # (for chainv3_cot, each .npz also
+#                                            #  contains pred_pmask_intermediate
+#                                            #  on rows where the two-pass branch
+#                                            #  fired -- see ``intermediate_in_npz``
+#                                            #  in predictions.jsonl)
 #   REASON3D_SAVE_PREDS=0                    # force no JSONL even if YAML true
 #
 # Multi-GPU eval (rarely needed for 100 rows):
@@ -80,6 +89,9 @@ _dataset_key_for_cfg() {
   case "$1" in
     *zeroshot_geo.yaml|*small_geo.yaml) echo "3d_refer_geo" ;;
     *zeroshot_chain.yaml|*small_chain.yaml) echo "3d_refer_chain" ;;
+    # NOTE: match *_cot before plain chainv3 so the more specific CoT YAML
+    # gets the chainv3_cot dataset key.
+    *zeroshot_chainv3_cot.yaml) echo "3d_refer_chainv3_cot" ;;
     *zeroshot_chainv3.yaml) echo "3d_refer_chainv3" ;;
     *) echo "3d_refer" ;;
   esac

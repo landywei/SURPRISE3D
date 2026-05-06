@@ -8,15 +8,21 @@ Typical layout after run_surprise_zeroshot_eval_small.sh:
 
 Each .npz contains float16 arrays pred_pmask, gt_pmask with one value per point,
 in the same order as the eval dataloader after ThreeDReferDataset.load +
-transform_test (see lavis/datasets/datasets/threedrefer_datasets.py).
+transform_test (see lavis/datasets/datasets/threedrefer_datasets.py). For
+chain-v3 CoT runs (``reason3d_t5_chainv3_cot``) the same .npz also contains
+``pred_pmask_intermediate`` for rows where the two-pass decode actually fired
+(see ``intermediate_in_npz`` in predictions.jsonl); when present, this script
+also writes a ``*_pred_intermediate.ply`` overlay alongside ``*_pred.ply``
+so you can eyeball the landmark mass-pool input vs. the final M_2.
 
 Mask files are named ``<scene_id>_<ann_id>_<eval_save_index>.npz`` (see
 ``lavis/tasks/refer_seg_task.py``). Each JSONL line lists the matching ``mask_npz``
 and ``eval_save_index`` so GT/pred align with that row's ``text_input`` / ``object_id``.
 
-Viewers: open ``*_gt.ply`` / ``*_pred.ply`` (not ``*_rgb.ply``) and enable vertex /
-point colors (e.g. CloudCompare: ``Edit > Colors > Set unique`` from RGB fields;
-Windows 3D Viewer often ignores PLY vertex colors).
+Viewers: open ``*_gt.ply`` / ``*_pred.ply`` / ``*_pred_intermediate.ply`` (not
+``*_rgb.ply``) and enable vertex / point colors (e.g. CloudCompare:
+``Edit > Colors > Set unique`` from RGB fields; Windows 3D Viewer often ignores
+PLY vertex colors).
 
 Examples:
   python scripts/visualize_qualitative_preds.py --qual-dir lavis/output/.../qualitative \\
@@ -34,6 +40,10 @@ Examples:
   python scripts/visualize_qualitative_preds.py --qual-dir .../qualitative \\
     --pts-root .../scannetpp --pth-subdir processed_surprise_full_pth \\
     --row-indices-file .../row_indices_bare.txt --out-dir /tmp/vis100 --stride 5
+
+  # Chain-v3 CoT run: by default *_pred_intermediate.ply is written whenever
+  # the npz carries it. Use --skip-intermediate to suppress, or
+  # --intermediate-only to skip *_pred.ply entirely.
 """
 
 from __future__ import annotations
@@ -123,6 +133,39 @@ def pred_for_display(pred: np.ndarray, mode: str) -> np.ndarray:
     return np.clip(p, 0.0, 1.0)
 
 
+_HIGHLIGHT_COLORS: Dict[str, np.ndarray] = {
+    # GT mask: red.
+    "gt": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+    # Final M_2 prediction: green (matches existing behavior).
+    "pred": np.array([0.0, 1.0, 0.0], dtype=np.float32),
+    # Pass-1 intermediate M_1 prediction (chainv3-CoT only): cyan/blue, picked
+    # to be unmistakably distinct from both gt-red and pred-green when both
+    # PLYs are loaded side-by-side in the same viewer.
+    "intermediate": np.array([0.0, 0.6, 1.0], dtype=np.float32),
+}
+
+
+def build_mask_overlay(
+    rgb_unit: np.ndarray,
+    mask: np.ndarray,
+    threshold: float,
+    background_scale: float,
+    color_name: str,
+) -> np.ndarray:
+    """Return ``[N, 3]`` colors with a single mask painted in the named highlight.
+
+    Non-foreground uses ``rgb_unit * background_scale`` so sparse foregrounds
+    (often ~0.1–2% of points) stay visible in MeshLab / CloudCompare; otherwise
+    bright primaries can disappear against busy RGB textures at full scale.
+    """
+    base = np.clip(rgb_unit.astype(np.float32, copy=False), 0.0, 1.0)
+    dim = np.clip(base * float(background_scale), 0.0, 1.0)
+    fg = np.asarray(mask, dtype=np.float64).reshape(-1) >= float(threshold)
+    out = dim.copy()
+    out[fg] = _HIGHLIGHT_COLORS[color_name]
+    return out
+
+
 def build_overlay_colors(
     rgb_unit: np.ndarray,
     gt: np.ndarray,
@@ -130,21 +173,9 @@ def build_overlay_colors(
     pred_threshold: float,
     background_scale: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Returns (colors_gt_highlight, colors_pred_highlight) each [N,3].
-
-    Foreground uses pure highlight colors. Non-foreground uses ``rgb_unit * background_scale``
-    so sparse GT (often ~0.1–2% of points) stays visible in MeshLab / CloudCompare; otherwise
-    red can disappear against busy RGB textures at full scale.
-    """
-    base = np.clip(rgb_unit.astype(np.float32, copy=False), 0.0, 1.0)
-    dim = np.clip(base * float(background_scale), 0.0, 1.0)
-    gt_m = np.asarray(gt, dtype=np.float64).reshape(-1) >= 0.5
-    pr_m = np.asarray(pred, dtype=np.float64).reshape(-1) >= float(pred_threshold)
-    c_gt = dim.copy()
-    c_gt[gt_m] = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-    c_pr = dim.copy()
-    c_pr[pr_m] = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    """Compatibility wrapper kept for callers that still want only (gt, pred)."""
+    c_gt = build_mask_overlay(rgb_unit, gt, 0.5, background_scale, "gt")
+    c_pr = build_mask_overlay(rgb_unit, pred, pred_threshold, background_scale, "pred")
     return c_gt, c_pr
 
 
@@ -225,17 +256,37 @@ def write_ply(xyz: np.ndarray, rgb: np.ndarray, out_path: str) -> None:
 
 
 def cmd_list(rows: List[Dict[str, Any]]) -> None:
-    hdr = f"{'idx':>4}  {'scene':12}  {'pIoU':>8}  {'spIoU':>8}  text"
+    # Add CoT columns only if any row carries them, so non-CoT runs keep their
+    # compact two-IoU table.
+    has_cot = any(("did_two_pass" in r) or ("intermediate_point_iou" in r) for r in rows)
+    if has_cot:
+        hdr = (
+            f"{'idx':>4}  {'scene':12}  {'pIoU':>8}  {'spIoU':>8}  "
+            f"{'2pass':>5}  {'iIoU':>8}  text"
+        )
+    else:
+        hdr = f"{'idx':>4}  {'scene':12}  {'pIoU':>8}  {'spIoU':>8}  text"
     print(hdr)
     print("-" * len(hdr))
     for i, r in enumerate(rows):
         t = r.get("text_input", "") or ""
         if len(t) > 72:
             t = t[:69] + "..."
-        print(
-            f"{i:4d}  {str(r.get('scene_id','')):12}  "
-            f"{float(r.get('point_iou', 0.0)):8.4f}  {float(r.get('superpoint_iou', 0.0)):8.4f}  {t}"
-        )
+        if has_cot:
+            two_pass = r.get("did_two_pass")
+            two_pass_s = "Y" if two_pass else ("N" if two_pass is False else "-")
+            i_iou = r.get("intermediate_point_iou")
+            i_iou_s = f"{float(i_iou):8.4f}" if isinstance(i_iou, (int, float)) else " " * 8
+            print(
+                f"{i:4d}  {str(r.get('scene_id','')):12}  "
+                f"{float(r.get('point_iou', 0.0)):8.4f}  {float(r.get('superpoint_iou', 0.0)):8.4f}  "
+                f"{two_pass_s:>5}  {i_iou_s}  {t}"
+            )
+        else:
+            print(
+                f"{i:4d}  {str(r.get('scene_id','')):12}  "
+                f"{float(r.get('point_iou', 0.0)):8.4f}  {float(r.get('superpoint_iou', 0.0)):8.4f}  {t}"
+            )
 
 
 def cmd_export(
@@ -250,6 +301,10 @@ def cmd_export(
     stride: int,
     pred_display: str,
     background_scale: float,
+    skip_gt: bool = False,
+    skip_rgb: bool = True,
+    skip_intermediate: bool = False,
+    skip_pred: bool = False,
     verbose: bool = True,
 ) -> None:
     if row_index < 0 or row_index >= len(rows):
@@ -268,6 +323,15 @@ def cmd_export(
     pred_raw = np.asarray(z["pred_pmask"], dtype=np.float32).reshape(-1)
     gt = np.asarray(z["gt_pmask"], dtype=np.float32).reshape(-1)
     pred = pred_for_display(pred_raw, pred_display).astype(np.float32)
+    # ``pred_pmask_intermediate`` only appears for chainv3-CoT rows where the
+    # two-pass decode actually fired; older runs / non-CoT models silently
+    # omit this key. Treat absence as "no intermediate to render".
+    inter_raw: Optional[np.ndarray] = None
+    if "pred_pmask_intermediate" in z.files:
+        inter_raw = np.asarray(z["pred_pmask_intermediate"], dtype=np.float32).reshape(-1)
+    inter: Optional[np.ndarray] = None
+    if inter_raw is not None:
+        inter = pred_for_display(inter_raw, pred_display).astype(np.float32)
 
     geo = load_scene_geometry(pth)
     if stride > 1:
@@ -275,11 +339,18 @@ def cmd_export(
         geo = SceneGeometry(xyz_middle=geo.xyz_middle[sl], rgb_unit=geo.rgb_unit[sl])
         pred = pred[sl]
         gt = gt[sl]
+        if inter is not None:
+            inter = inter[sl]
 
     if geo.xyz_middle.shape[0] != pred.shape[0]:
         raise SystemExit(
             f"Point count mismatch: pth N={geo.xyz_middle.shape[0]} vs mask N={pred.shape[0]}. "
             "Check pts_root / pth_rel_subdir and that the .pth matches the eval run."
+        )
+    if inter is not None and inter.shape[0] != pred.shape[0]:
+        raise SystemExit(
+            f"Intermediate mask N={inter.shape[0]} != pred N={pred.shape[0]} for row {row_index}; "
+            "stale .npz from before pred_pmask_intermediate was added with a different stride?"
         )
 
     os.makedirs(out_dir, exist_ok=True)
@@ -287,24 +358,46 @@ def cmd_export(
 
     gt_frac = float((gt >= 0.5).mean()) if gt.size else 0.0
     pr_frac = float((pred >= pred_threshold).mean()) if pred.size else 0.0
+    inter_frac = (
+        float((inter >= pred_threshold).mean()) if (inter is not None and inter.size) else None
+    )
+    has_inter_emit = inter is not None and not skip_intermediate
+    inter_msg = (
+        f" | inter>={pred_threshold} {100.0 * (inter_frac or 0.0):.4f}%" if inter is not None else ""
+    )
     print(
         f"Mask stats (row {row_index}): GT {100.0 * gt_frac:.4f}% | "
-        f"pred>={pred_threshold} {100.0 * pr_frac:.4f}% | pred_display={pred_display!r}",
+        f"pred>={pred_threshold} {100.0 * pr_frac:.4f}%{inter_msg} | pred_display={pred_display!r}",
         file=sys.stderr,
     )
 
-    write_ply(geo.xyz_middle, geo.rgb_unit, base + "_rgb.ply")
-    c_gt, c_pr = build_overlay_colors(
-        geo.rgb_unit, gt, pred, pred_threshold, background_scale=background_scale
-    )
-    write_ply(geo.xyz_middle, c_gt, base + "_gt.ply")
-    write_ply(geo.xyz_middle, c_pr, base + "_pred.ply")
-    if heatmap_pred:
-        write_ply(
-            geo.xyz_middle,
-            build_confidence_colors(geo.rgb_unit, pred),
-            base + "_pred_heat.ply",
+    if not skip_rgb:
+        write_ply(geo.xyz_middle, geo.rgb_unit, base + "_rgb.ply")
+    if not skip_gt:
+        c_gt = build_mask_overlay(geo.rgb_unit, gt, 0.5, background_scale, "gt")
+        write_ply(geo.xyz_middle, c_gt, base + "_gt.ply")
+    if not skip_pred:
+        c_pr = build_mask_overlay(
+            geo.rgb_unit, pred, pred_threshold, background_scale, "pred"
         )
+        write_ply(geo.xyz_middle, c_pr, base + "_pred.ply")
+        if heatmap_pred:
+            write_ply(
+                geo.xyz_middle,
+                build_confidence_colors(geo.rgb_unit, pred),
+                base + "_pred_heat.ply",
+            )
+    if has_inter_emit:
+        c_inter = build_mask_overlay(
+            geo.rgb_unit, inter, pred_threshold, background_scale, "intermediate"
+        )
+        write_ply(geo.xyz_middle, c_inter, base + "_pred_intermediate.ply")
+        if heatmap_pred:
+            write_ply(
+                geo.xyz_middle,
+                build_confidence_colors(geo.rgb_unit, inter),
+                base + "_pred_intermediate_heat.ply",
+            )
 
     meta = {
         "row_index": row_index,
@@ -325,22 +418,62 @@ def cmd_export(
         "pred_display": pred_display,
         "overlay_background_scale": background_scale,
     }
+    # Forward chainv3-CoT diagnostics into the per-row meta JSON when present.
+    for k in (
+        "did_two_pass",
+        "intermediate_point_iou",
+        "intermediate_in_npz",
+        "decoded_text_pass1",
+        "n_seg_pass1",
+        "n_seg_pass2",
+        "decoded_text",
+        "question_type",
+    ):
+        if k in row:
+            meta[k] = row[k]
+    if inter is not None:
+        meta["intermediate_in_npz_loaded"] = True
+        meta["intermediate_pred_positive_fraction"] = inter_frac
+        meta["intermediate_emitted_ply"] = has_inter_emit
     with open(base + "_meta.json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
     with open(base + "_caption.txt", "w", encoding="utf-8") as f:
         f.write(str(row.get("text_input", "")) + "\n")
+        # Pass-1 text is what queried the intermediate mask; surfacing it in
+        # the caption makes it easy to diff against the final decoded_text.
+        p1_text = row.get("decoded_text_pass1")
+        if p1_text:
+            f.write(f"\n[chainv3_cot pass1 decoded] {p1_text}\n")
 
+    suffixes: List[str] = []
+    if not skip_rgb:
+        suffixes.append("_rgb.ply")
+    if not skip_gt:
+        suffixes.append("_gt.ply")
+    if not skip_pred:
+        suffixes.append("_pred.ply")
+    if has_inter_emit:
+        suffixes.append("_pred_intermediate.ply")
     if verbose:
         print("Wrote:")
-        for suf in ("_rgb.ply", "_gt.ply", "_pred.ply"):
+        for suf in suffixes:
             print(" ", base + suf)
-        if heatmap_pred:
+        if heatmap_pred and not skip_pred:
             print(" ", base + "_pred_heat.ply")
+        if heatmap_pred and has_inter_emit:
+            print(" ", base + "_pred_intermediate_heat.ply")
         print(" ", base + "_meta.json")
         print(" ", base + "_caption.txt")
     else:
-        extra = " +heat" if heatmap_pred else ""
-        print(f"  -> {os.path.basename(base)}_rgb/gt/pred.ply{extra} +meta +caption", flush=True)
+        extras = []
+        if heatmap_pred and not skip_pred:
+            extras.append("heat")
+        if heatmap_pred and has_inter_emit:
+            extras.append("inter_heat")
+        extra = (" +" + "+".join(extras)) if extras else ""
+        names = ",".join(s.lstrip("_").removesuffix(".ply") for s in suffixes)
+        plys = f"{{{names}}}.ply" if len(suffixes) > 1 else (suffixes[0].lstrip("_") if suffixes else "")
+        print(f"  -> {os.path.basename(base)}_{plys}{extra} +meta +caption", flush=True)
 
 
 def cmd_export_all(
@@ -354,6 +487,10 @@ def cmd_export_all(
     stride: int,
     pred_display: str,
     background_scale: float,
+    skip_gt: bool = False,
+    skip_rgb: bool = True,
+    skip_intermediate: bool = False,
+    skip_pred: bool = False,
 ) -> None:
     n = len(rows)
     if n >= 8 and stride == 1:
@@ -376,6 +513,10 @@ def cmd_export_all(
             stride=stride,
             pred_display=pred_display,
             background_scale=background_scale,
+            skip_gt=skip_gt,
+            skip_rgb=skip_rgb,
+            skip_intermediate=skip_intermediate,
+            skip_pred=skip_pred,
             verbose=False,
         )
     print(f"Done. Outputs under {os.path.abspath(out_dir)}", flush=True)
@@ -453,6 +594,56 @@ def main() -> None:
         action="store_true",
         help="Also write *_pred_heat.ply coloring by soft prediction score.",
     )
+    gt_group = p.add_mutually_exclusive_group()
+    gt_group.add_argument(
+        "--skip-gt",
+        dest="skip_gt",
+        action="store_true",
+        default=False,
+        help="Do not write the *_gt.ply overlay (saves disk + time when only pred matters).",
+    )
+    gt_group.add_argument(
+        "--with-gt",
+        dest="skip_gt",
+        action="store_false",
+        help="Force writing *_gt.ply even when an upstream caller defaulted to --skip-gt.",
+    )
+    rgb_group = p.add_mutually_exclusive_group()
+    rgb_group.add_argument(
+        "--skip-rgb",
+        dest="skip_rgb",
+        action="store_true",
+        default=True,
+        help="Do not write the *_rgb.ply scene point cloud (default).",
+    )
+    rgb_group.add_argument(
+        "--with-rgb",
+        dest="skip_rgb",
+        action="store_false",
+        help="Also write *_rgb.ply (the unmasked scene RGB point cloud).",
+    )
+    inter_group = p.add_mutually_exclusive_group()
+    inter_group.add_argument(
+        "--skip-intermediate",
+        dest="skip_intermediate",
+        action="store_true",
+        default=False,
+        help="Do not write *_pred_intermediate.ply even when the .npz contains "
+        "pred_pmask_intermediate (chainv3-CoT runs).",
+    )
+    inter_group.add_argument(
+        "--with-intermediate",
+        dest="skip_intermediate",
+        action="store_false",
+        help="Force *_pred_intermediate.ply when the .npz carries it (default behavior).",
+    )
+    p.add_argument(
+        "--intermediate-only",
+        action="store_true",
+        default=False,
+        help="Skip *_pred.ply (final M_2 overlay) and only render the intermediate M_1 PLY. "
+        "Useful for landmark-only inspection on chainv3-CoT runs. No effect on non-CoT npz.",
+    )
     p.add_argument(
         "--stride",
         type=int,
@@ -505,12 +696,18 @@ def main() -> None:
             raise SystemExit("--stride must be >= 1")
         if not str(args.pts_root).strip():
             raise SystemExit("Set --pts-root or REASON3D_PTS_ROOT to the ScanNet++/surprise points root.")
+        if args.intermediate_only and args.skip_intermediate:
+            raise SystemExit(
+                "--intermediate-only and --skip-intermediate are mutually exclusive."
+            )
         st = max(1, int(args.stride))
         out_abs = os.path.abspath(args.out_dir)
         bg = float(args.overlay_background_scale)
         if not (0.0 <= bg <= 1.0):
             raise SystemExit("--overlay-background-scale must be between 0 and 1")
         pdisp = str(args.pred_display)
+        skip_pred = bool(args.intermediate_only)
+        skip_intermediate = bool(args.skip_intermediate)
         if args.export_all:
             cmd_export_all(
                 rows,
@@ -523,6 +720,10 @@ def main() -> None:
                 stride=st,
                 pred_display=pdisp,
                 background_scale=bg,
+                skip_gt=args.skip_gt,
+                skip_rgb=args.skip_rgb,
+                skip_intermediate=skip_intermediate,
+                skip_pred=skip_pred,
             )
         elif args.row_indices_file:
             idx_path = os.path.abspath(args.row_indices_file)
@@ -556,6 +757,10 @@ def main() -> None:
                     stride=st,
                     pred_display=pdisp,
                     background_scale=bg,
+                    skip_gt=args.skip_gt,
+                    skip_rgb=args.skip_rgb,
+                    skip_intermediate=skip_intermediate,
+                    skip_pred=skip_pred,
                     verbose=False,
                 )
                 n_ok += 1
@@ -573,6 +778,10 @@ def main() -> None:
                 stride=st,
                 pred_display=pdisp,
                 background_scale=bg,
+                skip_gt=args.skip_gt,
+                skip_rgb=args.skip_rgb,
+                skip_intermediate=skip_intermediate,
+                skip_pred=skip_pred,
                 verbose=True,
             )
 

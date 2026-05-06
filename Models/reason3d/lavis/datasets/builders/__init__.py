@@ -11,6 +11,7 @@ from lavis.datasets.builders.seg3d_builder import ThreeDReferBuilder
 import lavis.datasets.builders.seg3d_builder_geo  # noqa: F401 — registers 3d_refer_geo
 import lavis.datasets.builders.seg3d_builder_chain  # noqa: F401 — registers 3d_refer_chain
 import lavis.datasets.builders.seg3d_builder_chainv3  # noqa: F401 — registers 3d_refer_chainv3
+import lavis.datasets.builders.seg3d_builder_chainv3_cot  # noqa: F401 — registers 3d_refer_chainv3_cot
 
 from lavis.common.registry import registry
 

@@ -8,6 +8,19 @@ GT lists in ``samples["gt_pmasks_per_instance"]`` (provided by
 ``ThreeDReferDatasetChainV3``); when those are absent, the new fields are
 reported as NaN and the v3 task collapses to the base behavior.
 
+Also persists the chain-v3 CoT intermediate (M_1) mask when the model is
+``Reason3DT5ChainV3CoT`` and the two-pass decode actually fires:
+
+- ``predict_seg`` returns ``intermediate_sp_masks`` (list aligned with the
+  predict batch; B=1 here) and a ``chainv3_cot`` diagnostics dict.
+- When ``run.save_eval_prediction_masks`` is on, the per-row .npz gains a
+  ``pred_pmask_intermediate`` array (sigmoided point probabilities) next to
+  the existing ``pred_pmask`` / ``gt_pmask``.
+- ``predictions.jsonl`` rows gain ``did_two_pass``, ``decoded_text_pass1``,
+  ``n_seg_pass1``, ``n_seg_pass2``, ``intermediate_point_iou`` and
+  ``intermediate_in_npz``. Rows from non-CoT models leave the CoT-only fields
+  unset and ``intermediate_point_iou`` is ``null``.
+
 Registry id: ``3d_refer_seg_v3``.
 """
 
@@ -74,6 +87,23 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
         pred_pmask = pred_spmask[samples["superpoints"]]
         piou = get_iou(pred_pmask, gt_pmask, pred_confidence=model.pred_confidence)
 
+        # Chain-of-thought intermediate (M_1) mask, only present for the
+        # ``reason3d_t5_chainv3_cot`` model when pass-1 emitted >= 2 [SEG]s.
+        # ``intermediate_sp_masks`` is a list aligned with the predict_seg batch
+        # (B=1 here); each entry is a 1-D superpoint logit tensor or ``None``.
+        cot_meta = result.get("chainv3_cot", {}) if isinstance(result, dict) else {}
+        inter_sp = None
+        inter_list = result.get("intermediate_sp_masks") if isinstance(result, dict) else None
+        if inter_list:
+            inter_sp = inter_list[0]
+        inter_pmask = None
+        inter_piou = None
+        if inter_sp is not None:
+            inter_pmask = inter_sp[samples["superpoints"]]
+            inter_piou = get_iou(
+                inter_pmask, gt_pmask, pred_confidence=model.pred_confidence
+            )
+
         # Per-instance hit@tau (v3-only). NaN when per-instance GT is absent.
         max_inst_iou = float("nan")
         hit_25 = float("nan")
@@ -116,6 +146,7 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
                 oid = oid.detach().cpu().tolist()
             save_idx = self._eval_save_idx
             mask_rel = None
+            has_inter_in_npz = False
             if self.save_eval_prediction_masks and self._mask_dir is not None:
                 mask_name = f"{scan_id}_{ann_key}_{save_idx:06d}.npz"
                 mask_path = os.path.join(self._mask_dir, mask_name)
@@ -125,11 +156,26 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
                         torch.sigmoid(pred_pmask).detach().float().cpu().numpy().reshape(-1)
                     )
                 gt_np = gt_pmask.detach().float().cpu().numpy().reshape(-1)
-                np.savez_compressed(
-                    mask_path,
-                    pred_pmask=pred_np.astype(np.float16),
-                    gt_pmask=gt_np.astype(np.float16),
-                )
+                save_kwargs: Dict[str, np.ndarray] = {
+                    "pred_pmask": pred_np.astype(np.float16),
+                    "gt_pmask": gt_np.astype(np.float16),
+                }
+                # Add the chainv3-CoT intermediate (M_1) point mask alongside the
+                # final pred/gt so a single .npz fully describes the row.
+                if inter_pmask is not None:
+                    inter_np = inter_pmask.detach().float().cpu().numpy().reshape(-1)
+                    if inter_np.size and (inter_np.max() > 1.0 or inter_np.min() < 0.0):
+                        inter_np = (
+                            torch.sigmoid(inter_pmask)
+                            .detach()
+                            .float()
+                            .cpu()
+                            .numpy()
+                            .reshape(-1)
+                        )
+                    save_kwargs["pred_pmask_intermediate"] = inter_np.astype(np.float16)
+                    has_inter_in_npz = True
+                np.savez_compressed(mask_path, **save_kwargs)
                 mask_rel = os.path.join("qualitative", "masks", mask_name)
             self._eval_save_idx = save_idx + 1
             sp_fn = ""
@@ -155,6 +201,23 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
                 "mask_npz": mask_rel,
                 "sp_filename": sp_fn,
             }
+            # chainv3-CoT diagnostics: surface whether the two-pass branch
+            # actually fired and how the intermediate mask scored, plus the
+            # pass-1 decoded text used to query M_1.
+            if cot_meta:
+                row["did_two_pass"] = bool(cot_meta.get("did_two_pass", False))
+                p1_text = cot_meta.get("decoded_text_pass1")
+                if isinstance(p1_text, (list, tuple)):
+                    p1_text = p1_text[0] if p1_text else ""
+                row["decoded_text_pass1"] = p1_text
+                n_seg_p1 = cot_meta.get("n_seg_pass1") or []
+                n_seg_p2 = cot_meta.get("n_seg_pass2") or []
+                row["n_seg_pass1"] = int(n_seg_p1[0]) if n_seg_p1 else 0
+                row["n_seg_pass2"] = int(n_seg_p2[0]) if n_seg_p2 else 0
+            row["intermediate_point_iou"] = (
+                _scalar(inter_piou) if inter_piou is not None else None
+            )
+            row["intermediate_in_npz"] = has_inter_in_npz
             with open(self._pred_jsonl, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 

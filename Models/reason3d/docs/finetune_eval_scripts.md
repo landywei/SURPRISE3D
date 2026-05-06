@@ -53,7 +53,8 @@ Preprocessed point clouds are loaded from `join(points.storage, pth_rel_subdir, 
 
 - **Required:** `REASON3D_CKPT` — checkpoint to load (`model.reason3d_checkpoint`).
 - **Dataset key:** `3d_refer`. **PTH:** `REASON3D_PTH_SUBDIR` (default `processed_surprise_full_pth`, always passed) and optional `REASON3D_PTS_ROOT`.
-- **Optional:** `REASON3D_SAVE_PREDS=1|0` toggles `run.save_eval_predictions`; `REASON3D_FILTER_MISSING_GT_IN_PTH=0`; `REASON3D_EVAL_RESUME=1` with `REASON3D_EVAL_JOB_ID` to resume qualitative JSONL.
+- **Optional:** `REASON3D_SAVE_PREDS=1|0` toggles `run.save_eval_predictions`; `REASON3D_FILTER_MISSING_GT_IN_PTH=0`; `REASON3D_EVAL_RESUME=1` with `REASON3D_EVAL_JOB_ID` to manually resume qualitative JSONL.
+- **Auto-resume (default ON):** wraps the `python evaluate.py` call in a retry loop that pre-bakes `REASON3D_EVAL_JOB_ID`, forces `run.save_eval_predictions=true` + `run.eval_resume_predictions=true`, and re-launches in the same `lavis/<output_dir>/<job_id>/` folder when the process exits non-zero (e.g. CUDA OOM). Stops on success, on `Ctrl-C` (exit 130/131), after `REASON3D_MAX_RETRIES` attempts (default 10), or when no new predictions were written between two attempts (deterministic crash). Tunable: `REASON3D_AUTO_RESUME=0` to disable, `REASON3D_MAX_RETRIES`, `REASON3D_RESUME_BACKOFF_SECONDS` (default 5). Single-GPU only — for `NPROC>1` the dataset shrinks on resume and `DistributedSampler` sharding can drift, so disable auto-resume and resume manually.
 - **Multi-GPU:** `NPROC` &gt; 1 → `torchrun` + `run.distributed=true` + `run.use_dist_eval_sampler=true`.
 
 ### `run_surprise_zeroshot_eval_small.sh`

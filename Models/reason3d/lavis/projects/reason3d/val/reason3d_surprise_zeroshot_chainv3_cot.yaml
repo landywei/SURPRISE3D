@@ -1,0 +1,124 @@
+# Surprise val eval for the chain v3 CoT model (`reason3d_t5_chainv3_cot`).
+# Same task as plain chainv3 (`3d_refer_seg_v3`) so all of the union mIoU/Acc
+# and per-instance hit@tau metrics still print -- but the model's two-pass
+# `predict_seg` runs, so the eval task can also save the intermediate
+# (pass-1) mask `M_1` into `qualitative/masks/<scene>_<ann>_<idx>.npz`
+# under the key `pred_pmask_intermediate`.
+#
+# Use this YAML to evaluate any chainv3-CoT checkpoint with the new metrics:
+#   CFG=lavis/projects/reason3d/val/reason3d_surprise_zeroshot_chainv3_cot.yaml \
+#     REASON3D_CKPT=/path/to/checkpoint.pth bash scripts/run_surprise_zeroshot_eval.sh
+#
+# To also persist the per-row .npz (pred / gt / intermediate masks):
+#   REASON3D_SAVE_PREDS=1 REASON3D_SAVE_EVAL_MASKS=1 \
+#     CFG=...chainv3_cot.yaml REASON3D_CKPT=... \
+#     bash scripts/run_surprise_zeroshot_eval_100.sh
+#
+# Companion design doc: Models/reason3d/docs/chainv3_cot_design_space.md
+
+model:
+  arch: reason3d_t5_chainv3_cot
+  model_type: pretrain_flant5xl
+  reason3d_checkpoint: null
+  use_grad_checkpoint: False
+  mask_embedding: False
+  point_encoder_cfg:
+    input_channel: 6
+    media: 32
+    normalize_before: True
+    return_blocks: True
+    fix_module: ["input_conv", "unet", "output_layer"]
+    pretrained: "/nfs-stor/lan.wei/data/checkpoints/spf_scannet_512.pth"
+  mask_decoder_cfg:
+    media: 32
+    num_layer: 6
+    d_model: 256
+    d_text: 512
+    nhead: 8
+    hidden_dim: 1024
+    dropout: 0.0
+    activation_fn: "gelu"
+    attn_mask: True
+  seg_criterion_cfg:
+    loss_weight: [1.0, 1.0, 0.5, 5.0]
+    loss_fun: "focal"
+    enable_best_of_set: true
+    enable_scale_aware: true
+    enable_boundary: false
+    enable_point_aux: false
+    lambda_boundary: 0.5
+    lambda_point_aux: 0.5
+    lambda_cov: 0.1
+    small_size_threshold: 50
+    boundary_loss_type: "lovasz"
+  pred_confidence: 0.5
+
+datasets:
+  3d_refer_chainv3_cot:
+    dataset_init:
+      filter_missing_gt_in_pth: true
+      pth_rel_subdir: "processed_surprise_full_pth"
+      object_name_keys: ["object_name"]
+      max_object_name_chars: 96
+      chain_answer_fallback_plain: true
+      # CoT eval: leave probability at 1.0 so any sample whose question type is
+      # in `cot_question_types` and which has a landmark match emits the
+      # two-[SEG] target -- nothing about that affects inference (the model
+      # always tries pass 2 when pass 1 emits >= 2 [SEG]s), but it keeps the
+      # per-sample CoT-vs-non-CoT split consistent with training.
+      cot_template_prob: 1.0
+      cot_question_types: ["relative_position", "abs", "first_view"]
+      cot_target_phrase_template: "the {name}"
+    text_processor:
+      train:
+        name: "blip_question"
+        prompt: ""
+      eval:
+        name: "blip_question"
+    build_info:
+      annotations:
+        test:
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_val.json
+      points:
+        storage: /nfs-stor/lan.wei/data/scannetpp
+
+run:
+  task: 3d_refer_seg_v3
+  lr_sched: "linear_warmup_cosine_lr"
+  init_lr: 1e-4
+  min_lr: 1e-5
+  warmup_lr: 1e-8
+  warmup_steps: 1000
+  weight_decay: 0.05
+  max_epoch: 1
+  batch_size_train: 1
+  batch_size_eval: 1
+  num_workers: 2
+  accum_grad_iters: 1
+  max_len: 96
+  # CoT templates intentionally repeat the trigram ". ▁ [SEG]" once for the
+  # landmark and again for the target, so the chain-v3 chainwise defaults
+  # (rep-pen 1.2 + no-repeat-ngram 3) suppress the second [SEG] -- HF's
+  # NoRepeatNGramLogitsProcessor forbids reusing trigram (5, 3, 32100) and
+  # the repetition penalty further discounts the [SEG] logit. Disable both
+  # for the CoT eval; non-CoT (single-[SEG]) rows are unaffected by either.
+  decode_repetition_penalty: 1.0
+  decode_no_repeat_ngram_size: 0
+  min_len: 1
+  num_beams: 5
+  inference_method: "generate"
+  seed: 42
+  output_dir: "output/reason3d_surprise_zeroshot_chainv3_cot"
+  save_eval_predictions: false
+  save_eval_prediction_masks: false
+  amp: True
+  evaluate: True
+  train_splits: []
+  valid_splits: []
+  test_splits: ["test"]
+  use_dist_eval_sampler: false
+  device: "cuda"
+  gpu: 0
+  world_size: 1
+  distributed: false
+  dist_url: "env://"
