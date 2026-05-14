@@ -59,18 +59,46 @@ def _is_real_number(v: Any) -> bool:
 class ThreeDReferSegTaskV3(ThreeDReferSegTask):
     """``3d_refer_seg`` plus per-instance ``hit@tau`` / max-IoU on samples that ship per-instance GT."""
 
+    def _build_oom_row_base(self, samples, oom_msg: str) -> Dict[str, Any]:
+        """v3 sentinel: base row + NaN per-instance fields.
+
+        ``_collect_eval_rows`` filters per-instance metrics through
+        ``_is_real_number``, so NaN here means the row is excluded from
+        ``meanMaxIoU`` / ``hit@tau`` headline numbers. ``oom: true`` is
+        preserved by the parent so eval auto-resume can skip the row on
+        a manual retry.
+        """
+        row = super()._build_oom_row_base(samples, oom_msg)
+        row.update(
+            {
+                "max_per_instance_iou": float("nan"),
+                "hit_at_25": float("nan"),
+                "hit_at_50": float("nan"),
+                "per_instance_ious": [],
+                "intermediate_point_iou": None,
+                "intermediate_in_npz": False,
+            }
+        )
+        return row
+
     # ------------------------------------------------------------------
     # valid_step: compute base metrics + per-instance metrics, write JSONL.
     # ------------------------------------------------------------------
-    def valid_step(self, model, samples):
+    def _valid_step_body(self, model, samples, override_decode=None, oom_recovered_msg=None):
         rep_pen = float(getattr(self, "decode_repetition_penalty", 1.0))
         ngram = int(getattr(self, "decode_no_repeat_ngram_size", 0))
+        if override_decode:
+            num_beams = int(override_decode.get("num_beams", self.num_beams))
+            max_len = int(override_decode.get("max_len", self.max_len))
+        else:
+            num_beams = int(self.num_beams)
+            max_len = int(self.max_len)
         result = model.predict_seg(
             samples=samples,
             answer_list=None,
             inference_method=self.inference_method,
-            num_beams=self.num_beams,
-            max_len=self.max_len,
+            num_beams=num_beams,
+            max_len=max_len,
             min_len=self.min_len,
             num_ans_candidates=self.num_ans_candidates,
             prompt=self.prompt,
@@ -120,14 +148,23 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
                 hit_25 = 1.0 if max_inst_iou >= 0.25 else 0.0
                 hit_50 = 1.0 if max_inst_iou >= 0.50 else 0.0
 
+        # NOTE: do NOT keep ``gt_pmask`` / ``pred_pmask`` (or ``inter_pmask``)
+        # in the returned dict. ``base_task.evaluation`` accumulates every
+        # valid_step's return into a long-lived ``results`` list; returning
+        # per-point CUDA tensors here was leaking ~6+ MB of GPU memory per
+        # row, which on 10174 rows of Surprise val grew to ~14 GiB on top of
+        # the ~13 GiB of fp32 model weights -- and is what caused the
+        # late-eval OOMs around row 2130+ on scenes 578511c8a9 / c4c04e6d6c
+        # even with the OOM safety net active. Mask tensors are already
+        # written to disk by the np.savez_compressed branch below when
+        # ``save_eval_prediction_masks`` is on; in-memory metric scalars are
+        # CPU-ified so the result dict holds no live CUDA references.
         result_record = dict(
             scan_id=samples["scan_ids"][0],
             object_id=samples["object_ids"][0],
             ann_id=samples["ann_ids"][0],
-            piou=piou,
-            spiou=spiou,
-            gt_pmask=gt_pmask,
-            pred_pmask=pred_pmask,
+            piou=_scalar(piou),
+            spiou=_scalar(spiou),
             max_per_instance_iou=max_inst_iou,
             hit_at_25=hit_25,
             hit_at_50=hit_50,
@@ -218,6 +255,14 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
                 _scalar(inter_piou) if inter_piou is not None else None
             )
             row["intermediate_in_npz"] = has_inter_in_npz
+            if override_decode:
+                row["oom_recovered"] = True
+                row["oom_fallback_num_beams"] = int(
+                    override_decode.get("num_beams", num_beams)
+                )
+                row["oom_fallback_max_len"] = int(
+                    override_decode.get("max_len", max_len)
+                )
             with open(self._pred_jsonl, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
@@ -232,7 +277,10 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
 
         Prefers the on-disk ``predictions.jsonl`` when it is available
         (matches whatever the base task already aggregates from); otherwise
-        falls back to the in-memory ``val_result``.
+        falls back to the in-memory ``val_result``. Rows tagged ``oom: true``
+        are passed through with NaN ious and counted as one row apiece;
+        ``_is_real_number`` in ``after_evaluation`` excludes them from the
+        headline metric means.
         """
         rows: List[Dict[str, Any]] = []
         jsonl_path = getattr(self, "_pred_jsonl", None)
@@ -258,6 +306,8 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
                             "max_per_instance_iou": raw.get("max_per_instance_iou"),
                             "hit_at_25": raw.get("hit_at_25"),
                             "hit_at_50": raw.get("hit_at_50"),
+                            "oom": bool(raw.get("oom", False)),
+                            "oom_recovered": bool(raw.get("oom_recovered", False)),
                         }
                     )
         elif val_result:
@@ -269,6 +319,8 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
                         "max_per_instance_iou": r.get("max_per_instance_iou"),
                         "hit_at_25": r.get("hit_at_25"),
                         "hit_at_50": r.get("hit_at_50"),
+                        "oom": bool(r.get("oom", False)),
+                        "oom_recovered": bool(r.get("oom_recovered", False)),
                     }
                 )
         return rows
@@ -294,9 +346,25 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
             )
             return
 
+        # Sentinel accounting:
+        #   n_total           -- every row attempted (real, recovered, sentinel)
+        #   n_oom             -- OOM sentinels (NaN ious, no mask)
+        #   n_oom_recovered   -- rows that succeeded on the reduced-beams retry
+        # The JSONL truth wins over the in-memory counter so a process
+        # restart via auto-resume still surfaces the right tally.
+        n_total = len(rows)
+        n_oom = sum(1 for r in rows if r.get("oom"))
+        n_oom_recovered = sum(1 for r in rows if r.get("oom_recovered"))
+        n_oom = max(n_oom, int(getattr(self, "_oom_count", 0)))
+        n_oom_recovered = max(
+            n_oom_recovered, int(getattr(self, "_oom_recovered_count", 0))
+        )
+
         # Union (single-mask) metrics — recomputed here so we have all 6 numbers
         # in one place to print. Matches the base task's recipe (Acc@tau is
-        # computed against piou; mIoU is the mean piou).
+        # computed against piou; mIoU is the mean piou). NaN ious from OOM
+        # sentinels are filtered by ``_is_real_number`` so they do not pollute
+        # the headline numbers; they're still tallied in ``n_oom``.
         pious = np.asarray(
             [r["piou"] for r in rows if _is_real_number(r.get("piou"))],
             dtype=np.float64,
@@ -337,8 +405,15 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
         print("                          chainv3 metrics")
         print(bar)
         print(
-            "split={}  epoch={}  n_union={}  n_per_inst={}  output_dir={}".format(
-                split_name, epoch, n_union, n_perinst, out_dir or "<unknown>"
+            "split={}  epoch={}  n_total={}  n_oom={}  n_oom_recovered={}  n_union={}  n_per_inst={}  output_dir={}".format(
+                split_name,
+                epoch,
+                n_total,
+                n_oom,
+                n_oom_recovered,
+                n_union,
+                n_perinst,
+                out_dir or "<unknown>",
             )
         )
         print(
@@ -382,6 +457,9 @@ class ThreeDReferSegTaskV3(ThreeDReferSegTask):
             metrics = {
                 "split": split_name,
                 "epoch": epoch,
+                "n_total": n_total,
+                "n_oom": n_oom,
+                "n_oom_recovered": n_oom_recovered,
                 "n_union": n_union,
                 "n_per_instance": n_perinst,
                 "miou": miou,

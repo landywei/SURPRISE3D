@@ -48,7 +48,13 @@ model:
 datasets:
   3d_refer:
     dataset_init:
-      filter_missing_gt_in_pth: true
+      # Annotations file below is already filter-pre-applied (see
+      # scripts/build_filtered_surprise_val.py); flip this to false so the
+      # runtime filter is a no-op, which guarantees a byte-identical row set
+      # across runs regardless of .pth state or eval auto-resume. To
+      # re-enable runtime filtering, point storage at surprise_val.json and
+      # flip back to true.
+      filter_missing_gt_in_pth: false
       pth_rel_subdir: "processed_surprise_full_pth"
     text_processor:
       train:
@@ -59,7 +65,7 @@ datasets:
     build_info:
       annotations:
         test:
-          storage: /nfs-stor/lan.wei/data/annotations/surprise_val.json
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_val_filtered_v1.json
       points:
         storage: /nfs-stor/lan.wei/data/scannetpp
 

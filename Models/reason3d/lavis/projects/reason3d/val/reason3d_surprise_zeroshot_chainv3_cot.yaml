@@ -56,7 +56,9 @@ model:
 datasets:
   3d_refer_chainv3_cot:
     dataset_init:
-      filter_missing_gt_in_pth: true
+      # Pre-filtered annotations; runtime filter off. See
+      # scripts/build_filtered_surprise_val.py.
+      filter_missing_gt_in_pth: false
       pth_rel_subdir: "processed_surprise_full_pth"
       object_name_keys: ["object_name"]
       max_object_name_chars: 96
@@ -78,7 +80,7 @@ datasets:
     build_info:
       annotations:
         test:
-          storage: /nfs-stor/lan.wei/data/annotations/surprise_val.json
+          storage: /nfs-stor/lan.wei/data/annotations/surprise_val_filtered_v1.json
       points:
         storage: /nfs-stor/lan.wei/data/scannetpp
 

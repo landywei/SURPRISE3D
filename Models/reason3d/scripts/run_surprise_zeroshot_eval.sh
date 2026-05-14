@@ -29,15 +29,28 @@
 # Point cloud .pth dir (default YAML uses pth_rel_subdir=processed under points.storage):
 #   REASON3D_PTH_SUBDIR=processed_surprise_full_pth
 #   REASON3D_PTS_ROOT=/nfs-stor/lan.wei/data/scannetpp   # omit if same as YAML
-# filter_missing_gt_in_pth is forced ON here (drops QA rows with no object_id in .pth). Opt out:
-#   REASON3D_FILTER_MISSING_GT_IN_PTH=0
+# filter_missing_gt_in_pth: the four full-val YAMLs are pinned to a pre-filtered JSON
+# (scripts/build_filtered_surprise_val.py) and set filter_missing_gt_in_pth: false, so
+# the runtime filter is a no-op. To force it on/off from the shell anyway:
+#   REASON3D_FILTER_MISSING_GT_IN_PTH=1   # force on
+#   REASON3D_FILTER_MISSING_GT_IN_PTH=0   # force off
 #
 # Resume after crash (reuse the same output job folder name under lavis/<output_dir>/):
 #   REASON3D_EVAL_RESUME=1 REASON3D_EVAL_JOB_ID=<timestamp folder>
 #   Same CFG and run.output_dir in YAML as the partial run. Use REASON3D_SAVE_PREDS=1 (or YAML save_eval_predictions true).
 #   With multi-GPU + DistributedSampler, prefer resuming single-GPU or verify sampler length matches filtered dataset.
 #
-# Auto-resume on crash (e.g. CUDA OOM): default ON; opt out with REASON3D_AUTO_RESUME=0.
+# Auto-resume on crash (e.g. CUDA OOM): default OFF; opt in with REASON3D_AUTO_RESUME=1.
+#   Why default OFF: with auto-resume ON, run.eval_resume_predictions=true gates rows by the
+#   (scene_id, ann_id) keys already present in qualitative/predictions.jsonl. If the dataset's
+#   filtered row set drifts between attempts (e.g. .pth regenerated underneath, instance-id
+#   cache stale, or an earlier crash left a mid-run JSONL), the second attempt sees a different
+#   key set and the final row count `n` differs from a clean single-shot run. Pinning a filtered
+#   val JSON (scripts/build_filtered_surprise_val.py + filter_missing_gt_in_pth: false) closes
+#   one drift source, but a partial JSONL from a previous crashed run can still skew `n`. Treat
+#   auto-resume as a recovery escape hatch, not the default.
+#
+# When auto-resume is enabled (REASON3D_AUTO_RESUME=1):
 #   - Pre-generates REASON3D_EVAL_JOB_ID so all retries write into the same lavis/<output_dir>/<id>/ folder.
 #   - Forces run.save_eval_predictions=true + run.eval_resume_predictions=true so each retry appends to
 #     qualitative/predictions.jsonl and skips already-completed (scene_id, ann_id) pairs.
@@ -104,10 +117,16 @@ fi
 if [[ -n "${REASON3D_PTS_ROOT:-}" ]]; then
   OPTS+=( "datasets.${DKEY}.build_info.points.storage=${REASON3D_PTS_ROOT}" )
 fi
-if [[ "${REASON3D_FILTER_MISSING_GT_IN_PTH:-1}" == "0" ]]; then
-  OPTS+=( "datasets.${DKEY}.dataset_init.filter_missing_gt_in_pth=false" )
-else
-  OPTS+=( "datasets.${DKEY}.dataset_init.filter_missing_gt_in_pth=true" )
+# Honour whatever the YAML sets (the four full-val YAMLs now point at a
+# pre-filtered JSON and set filter_missing_gt_in_pth: false, so the runtime
+# filter is a no-op there). Only override when REASON3D_FILTER_MISSING_GT_IN_PTH
+# is explicitly set in the environment.
+if [[ -n "${REASON3D_FILTER_MISSING_GT_IN_PTH:-}" ]]; then
+  if [[ "${REASON3D_FILTER_MISSING_GT_IN_PTH}" == "0" ]]; then
+    OPTS+=( "datasets.${DKEY}.dataset_init.filter_missing_gt_in_pth=false" )
+  else
+    OPTS+=( "datasets.${DKEY}.dataset_init.filter_missing_gt_in_pth=true" )
+  fi
 fi
 if [[ "${REASON3D_EVAL_RESUME:-0}" == "1" ]]; then
   if [[ -z "${REASON3D_EVAL_JOB_ID:-}" ]]; then
@@ -122,7 +141,7 @@ if [[ "${REASON3D_EVAL_RESUME:-0}" == "1" ]]; then
   fi
 fi
 
-AUTO_RESUME="${REASON3D_AUTO_RESUME:-1}"
+AUTO_RESUME="${REASON3D_AUTO_RESUME:-0}"
 MAX_RETRIES="${REASON3D_MAX_RETRIES:-10}"
 RESUME_BACKOFF="${REASON3D_RESUME_BACKOFF_SECONDS:-5}"
 
