@@ -36,23 +36,35 @@ default, see [`Models/reason3d/docs/finetune_eval_scripts.md`](Models/reason3d/d
     scale-aware dice, and optional Lovász/focal auxiliaries), and Chain v3
     CoT (a two-pass forward with a mass-pooled landmark feature).
 
-4.  **Current numbers (Surprise3D val, checkpoint 8).** Four of five
-    planned branches have completed ckpt 8; `chain` is still pending.
-    `vanilla` Reason3D gets `mIoU = 24.55%`, `hit@0.50 = 20.83%`,
-    `Δ_50 = hit@0.50 − A_50 = −2.16pt` (multi-target spreading).
-    Each CriterionV3-flavour branch flips `Δ_50` positive: `no_scale`
-    (best-of-set only, **strongest per-instance**) reaches
-    `hit@0.50 = 23.74%`, `Δ_50 = +6.10pt`; `lovasz` 23.44%, +4.41pt;
-    `cot` 23.09%, +4.00pt. The architectural extension (`cot`) does
-    not beat the loss-only branches at this checkpoint, but improves
-    over `vanilla` by +2.26pt `hit@0.50` and +6.16pt `Δ_50`.
+4.  **Current numbers (Surprise3D val, checkpoint 10).** Four of five
+    planned branches have completed ckpt 10; `chain` is still pending.
+    All four eval runs share an **identical pinned val row set
+    (n = 10,174 across all six question-type families)** — the eval
+    pipeline now has reproducibility guarantees the earlier ckpt-8
+    numbers did not (per-row OOM safety net, GPU-tensor accumulator
+    leak fixed, val JSON pinned via
+    `scripts/build_filtered_surprise_val.py`; see §6 and §9.4).
+    `vanilla` Reason3D gets `mIoU = 24.64%`, `hit@0.50 = 18.68%`,
+    `Δ_50 = hit@0.50 − A_50 = −3.17pt` (multi-target spreading).
+    Each CriterionV3-flavour branch flips `Δ_50` positive: `lovasz`
+    (best-of-set + scale-aware + Lovász, **strongest per-instance**)
+    reaches `hit@0.50 = 24.47%`, `Δ_50 = +5.72pt`, `meanMaxIoU = 25.15%`;
+    `no_scale` 22.53%, +3.98pt; `cot` 22.68%, +3.53pt. The architectural
+    extension (`cot`) improves over `vanilla` by +4.00pt `hit@0.50` and
+    +6.70pt `Δ_50`, but does not beat the loss-only branches at this
+    checkpoint — `lovasz`'s boundary term is the dominant lever on
+    Surprise3D val at ckpt 10. **These ckpt-10 numbers supersede any
+    earlier ckpt-8 numbers in this document and prior commits**:
+    different `n` across branches and a since-fixed eval-side memory
+    leak made the ckpt-8 row counts unreliable as a four-way ablation.
 
 5.  **Plan.** Train five branches to 8 checkpoints each (bare Reason3D,
     chain, loss = `no_scale` + `lovasz`, B' CoT) and compare across the six
     Surprise3D query families plus qualitative analysis of intermediate
-    landmark masks. The ckpt-8 numbers above are the first complete row
-    of this sweep; the 8-checkpoint plan is the canonical
-    grid that will replace them.
+    landmark masks. The ckpt-10 numbers above are the latest fully-trusted
+    row of this sweep (eval pipeline now reproducible end-to-end); the
+    8-checkpoint plan in §6 will fill in the missing `chain` row and the
+    earlier checkpoint indices.
 
 The rest of this document explains each of these in detail.
 
@@ -183,11 +195,15 @@ preprocessing fix.
 
 > **Honest caveat.** This 22.95% number is *not* directly comparable to
 > any other Surprise3D evaluation in the literature, because both the
-> filtered val set (n = 8,229 vs. the upstream nominal 10,198) and the
-> set of trainable instances differ. The right way to read it: under
-> our preprocessing, vanilla Reason3D scores 22.95% — and we treat that
+> filtered val set (n = 10,174 in the canonical pinned JSON used at
+> ckpt 10; the original ad-hoc-filtered runs reported n ≈ 8,229) and
+> the set of trainable instances differ. The right way to read it:
+> under our preprocessing, vanilla Reason3D scores 22.95% on the
+> earlier ad-hoc filter — and at ckpt 10 on the pinned filter
+> (n = 10,174) it scores **24.64%** (§4.1). We treat the latter
 > as the floor that CriterionV3 and Chain v3 CoT need to beat *on the
-> same preprocessing pipeline* (which they do; see §4).
+> same preprocessing pipeline* (which they do on per-instance metrics;
+> see §4).
 
 ---
 
@@ -405,19 +421,47 @@ sample on the `[SEG]` count in the tokenized labels.
 
 ## 4. Current numbers — Bare, Chain, Loss, CoT
 
-All numbers below are from the **checkpoint-8** sweep on the full
+All numbers below are from the **checkpoint-10** sweep on the full
 Surprise3D val split. Four of the five planned branches in §6.1 have
-landed at ckpt 8 (`vanilla`, `no_scale`, `lovasz`, `cot`); the
+landed at ckpt 10 (`vanilla`, `no_scale`, `lovasz`, `cot`); the
 **chain** branch (legacy union loss on the chain v3 single-pass
 architecture, the apples-to-apples reference for the loss-only
 contribution) is still pending and is the missing piece for a fully
-clean four-way ablation. Sample sizes vary slightly across branches
-(`vanilla` n = 8,230, `lovasz` n = 8,229, `cot` n = 8,226,
-`no_scale` n = 8,016) because the dataset filter
-(§1.3.C) drops a different set of rows per run depending on which
-`object_id`s survive the per-scene cache; `cot` additionally drops
-queries when the two-pass decoder cannot emit two well-formed
-`[SEG]`s.
+clean four-way ablation.
+
+**These numbers supersede the earlier ckpt-8 numbers in earlier
+commits of this README.** The ckpt-8 row counts varied across
+branches (`vanilla` 8,230 / `lovasz` 8,229 / `cot` 8,226 / `no_scale`
+8,016) for two reasons we have since closed:
+
+- **An eval-side GPU memory leak** in the per-row return path of
+  `valid_step` accumulated `pred_pmask` / `gt_pmask` CUDA tensors
+  across rows. By row ~2400 of a 10,174-row val sweep this was
+  ~14 GiB of leaked GPU memory on top of the ~13 GiB of fp32 model
+  weights, which caused late-eval CUDA OOMs on heavy scannet++
+  scenes (e.g. `578511c8a9`, `c4c04e6d6c`). Each OOM truncated the
+  run silently and produced a different `n`. **Fixed** by dropping
+  the per-point CUDA tensors from the returned dict in
+  `lavis/tasks/refer_seg_task.py` (the masks are still written to
+  disk via `np.savez_compressed`).
+- **Drift in the dataset's runtime filter** (§1.3.C) across runs
+  depending on the per-scene `.pth` mtimes and instance-id cache
+  state. **Fixed** by pinning a pre-filtered val JSON
+  (`scripts/build_filtered_surprise_val.py` →
+  `surprise_val_filtered_v1.json`) and setting
+  `dataset_init.filter_missing_gt_in_pth: false` in every val YAML;
+  see §9.4 for the canonical procedure.
+
+The eval also gained a **per-row OOM safety net**: a CUDA OOM on
+`predict_seg` is converted to either (a) a `num_beams=1`,
+`max_len=32` recovery retry that almost always succeeds, or (b) a
+`oom: true` sentinel row in `predictions.jsonl` with NaN ious. Each
+`metrics_v3_test.json` therefore now reports `n_total`, `n_oom`,
+`n_oom_recovered` alongside the headline metrics. For all four
+branches at ckpt 10 the values were `n_total=10174, n_oom=0,
+n_oom_recovered=0` — i.e. the leak and pinning fixes alone were
+enough to keep every row inside the GPU memory envelope, the safety
+net never had to fire on this run.
 
 > **Honest caveat on the comparison protocol.** The two loss branches
 > (`no_scale` = A3, `lovasz` = A4) and the `cot` branch all share the
@@ -426,135 +470,146 @@ queries when the two-pass decoder cannot emit two well-formed
 > loss, so it is the ablation floor for *both* the loss change and the
 > architecture change. The right loss-only reference (chain v3
 > architecture, legacy loss) is the **chain** branch in §6.1, which has
-> not yet completed its checkpoint-8 sweep — until it does, the
+> not yet completed its checkpoint-10 sweep — until it does, the
 > apples-to-apples loss-only delta is mildly confounded with
 > chain-v3-architecture effects.
 
-### 4.1 Headline table (checkpoint 8)
+### 4.1 Headline table (checkpoint 10)
 
 | Method | n | mIoU | A_25 | A_50 | meanMaxIoU | hit@0.25 | hit@0.50 | Δ_50 |
 |--------|--:|-----:|-----:|-----:|-----------:|---------:|---------:|-----:|
-| `vanilla` (Reason3D, legacy loss, single-[SEG])      | 8230 | **24.55** | **37.23** | **22.99** | 23.84 | 36.88 | 20.83 | −2.16 |
-| `chain` (chain v3 single-pass, legacy loss)          |  —   |   —   |   —   |   —   |   —   |   —   |   —   |  —  |
-| `no_scale` (chain v3, CriterionV3 `bos` only)        | 8016 | 20.48 | 30.84 | 17.64 | **25.44** | 36.85 | **23.74** | **+6.10** |
-| `lovasz` (chain v3, CriterionV3 `bos+scl+lovasz`)    | 8229 | 21.82 | 33.24 | 19.03 | 25.20 | **37.51** | 23.44 | +4.41 |
-| `cot` (chain v3 CoT, CriterionV3 default `bos+scl`)  | 8226 | 21.79 | 33.52 | 19.09 | 25.00 | 37.21 | 23.09 | +4.00 |
+| `vanilla` (Reason3D, legacy loss, single-[SEG])      | 10174 | **24.64** | **37.70** | **21.85** | 23.03 | 35.95 | 18.68 | −3.17 |
+| `chain` (chain v3 single-pass, legacy loss)          |  —    |   —   |   —   |   —   |   —   |   —   |   —   |  —  |
+| `no_scale` (chain v3, CriterionV3 `bos` only)        | 10174 | 21.34 | 32.75 | 18.55 | 24.33 | 37.06 | 22.53 | +3.98 |
+| `lovasz` (chain v3, CriterionV3 `bos+scl+lovasz`)    | 10174 | 21.30 | 32.62 | 18.75 | **25.15** | **37.45** | **24.47** | **+5.72** |
+| `cot` (chain v3 CoT, CriterionV3 default `bos+scl`)  | 10174 | 21.65 | 32.81 | 19.15 | 24.55 | 36.74 | 22.68 | +3.53 |
 
-Four things to read from this table:
+Five things to read from this table:
 
-1. **Vanilla `mIoU > meanMaxIoU` (24.55 > 23.84).** Same spreading
-   fingerprint from §2.2 P1; the gap is smaller than at the older
-   checkpoint (was 1.08pt, now 0.71pt) but `Δ_50 = −2.16pt` still
-   confirms multi-target averaging.
+1. **Vanilla wins every union metric** (`mIoU` 24.64, `A_25` 37.70,
+   `A_50` 21.85). All three CriterionV3-flavour branches give up
+   ~3pt of `mIoU` and ~3pt of `A_50` to vanilla. The union-side
+   regression is the cost of moving to a per-instance loss; the
+   per-instance numbers below are what the trade-off pays for.
 
-2. **All three CriterionV3-flavour branches flip the inequality.**
+2. **Vanilla `mIoU > meanMaxIoU` (24.64 > 23.03)** and `Δ_50 = −3.17pt`.
+   Same multi-target spreading fingerprint from §2.2 P1, slightly
+   wider than at ckpt 8 (gap was 0.71pt, now 1.61pt). Vanilla is
+   averaging across multi-target referents — the headline `mIoU`
+   overstates how often the model actually commits to one of them.
+
+3. **All three CriterionV3-flavour branches flip the inequality.**
    `meanMaxIoU > mIoU` and `Δ_50 > 0` for every loss/CoT branch. The
-   amount differs: `no_scale` has the largest gap (+6.10pt),
-   `lovasz` next (+4.41pt), `cot` last among the three (+4.00pt).
-   The pattern matches the older A-grid result that **best-of-set
-   alone is the dominant lever for per-instance commitment**, with
-   scale-aware and boundary terms playing a smaller role.
+   amount differs: `lovasz` has the largest gap (+5.72pt), `no_scale`
+   next (+3.98pt), `cot` last among the three (+3.53pt). The
+   ckpt-10 ranking inverts the ckpt-8 ranking, where `no_scale`
+   (best-of-set only) led on `Δ_50`. Three more checkpoints of
+   training are enough for the **boundary (Lovász) term** to take
+   effect — at ckpt 10 it adds an extra +1.74pt of `Δ_50` over
+   `no_scale`, and an extra +0.82pt of `meanMaxIoU` (24.33 → 25.15).
 
-3. **`no_scale` is the strongest per-instance run by every metric**
-   (`meanMaxIoU` 25.44, `hit@0.50` 23.74, `Δ_50` +6.10). Its row
-   count is also the lowest (8,016), and the deficit is concentrated
-   on `camera_view` (n = 61 vs. ~326 for the other branches; see
-   §4.2). Treat `no_scale`'s `camera_view` numbers as not directly
-   comparable; the headline `meanMaxIoU` / `hit@τ` are still
-   informative because they are dominated by the high-volume
-   non-relational families (`cs` + `hi` ≈ 70% of the data).
+4. **`lovasz` is the strongest per-instance run by every metric**
+   (`meanMaxIoU` 25.15, `hit@0.25` 37.45, `hit@0.50` 24.47,
+   `Δ_50` +5.72). It is also the run that most cleanly trades
+   `mIoU` for `meanMaxIoU`: its `mIoU` (21.30) is the lowest of the
+   four but its `meanMaxIoU` (25.15) is the highest, the textbook
+   shape of a model that has learned per-instance commitment at the
+   cost of per-pixel averaging.
 
-4. **`cot` is competitive with `lovasz` but no longer dominant.**
-   At this checkpoint `cot` lands roughly on top of `lovasz` for
-   union metrics (`mIoU` 21.79 vs. 21.82, `A_50` 19.09 vs. 19.03)
-   and slightly behind on per-instance (`hit@0.50` 23.09 vs. 23.44,
-   `Δ_50` +4.00 vs. +4.41). The architectural extension is paying
-   for itself relative to vanilla (+2.26pt `hit@0.50`, +6.16pt
-   `Δ_50`), but **does not** beat the simplest CriterionV3 ablation
-   (`no_scale` = best-of-set only) on any of the headline columns at
-   ckpt 8 — the per-question-type breakdown below shows where the
-   architectural edge actually lives.
+5. **`cot` is competitive but no longer dominant.** At this checkpoint
+   `cot` lands above the loss-only branches on `mIoU` (21.65) and
+   `A_50` (19.15) — the highest among the three CriterionV3-flavour
+   branches on union metrics — but behind `lovasz` on every
+   per-instance column (`meanMaxIoU` 24.55 vs. 25.15, `hit@0.50`
+   22.68 vs. 24.47, `Δ_50` +3.53 vs. +5.72). The architectural
+   extension is still paying for itself relative to vanilla
+   (+4.00pt `hit@0.50`, +6.70pt `Δ_50`), but **does not** beat the
+   loss-only branches on the per-instance headline at ckpt 10 — the
+   per-question-type breakdown below shows where the architectural
+   edge actually lives (and where it does not).
 
-### 4.2 Per-question-type breakdown — `hit@0.50` (checkpoint 8)
+### 4.2 Per-question-type breakdown — `hit@0.50` (checkpoint 10)
 
 |                       | cs | hi | first_view | rel_pos | abs | camera_view |
 |-----------------------|---:|---:|----------:|--------:|----:|------------:|
-| `vanilla`             | 18.66 | 22.60 | 23.45 | 21.78 | 12.08 | **27.91** |
-| `no_scale`            | **23.55** | **26.34** | 23.69 | **23.85** | 12.76 | 8.20† |
-| `lovasz`              | 23.31 | 25.20 | **23.91** | 22.08 | 11.89 | **29.75** |
-| `cot`                 | 22.81 | 26.21 | 22.24 | 19.59 | 12.08 | 26.99 |
+| `vanilla`             | 16.66 | 20.26 | 21.05 | 19.75 |  9.82 | 20.03 |
+| `no_scale`            | 23.19 | 25.28 | 21.72 | 20.85 | **11.82** | 21.59 |
+| `lovasz`              | **25.58** | **28.46** | **23.08** | **21.40** | 11.64 | **22.52** |
+| `cot`                 | 23.64 | 24.93 | 22.57 | 20.58 | 11.64 | 21.85 |
 
-*n per family per branch:* `vanilla` (cs 2824, hi 2766, first_view
-1100, rel_pos 684, abs 530, camera_view 326);
-`no_scale` (cs 2870, hi 2779, first_view 1106, rel_pos 675, abs 525,
-camera_view **61** †); `lovasz` and `cot` match `vanilla` closely
-(within 4 rows on every family).
-
-† The `no_scale` `camera_view` cell is on n = 61 rows (vs. ~326 for
-the other branches) — the run dropped most camera-pose-conditioned
-queries through the per-scene filter, so this number is not directly
-comparable. All other `no_scale` cells stay within 5% of the matching
-n on the other three branches.
+*n per family per branch:* identical across all four branches —
+`cs` 2,893, `hi` 2,892, `camera_view` 1,927, `first_view` 1,183,
+`rel_pos` 729, `abs` 550 (total 10,174). The pinned val JSON +
+fixed-leak eval guarantee a byte-identical row set per branch, so
+every cell above is computed on exactly the same denominator.
 
 Pattern in plain English:
 
-- **Best-of-set drives the multi-target families.** Both `no_scale`
-  (bos only) and `lovasz` (bos + scl + Lovász) lift `cs` by ~5pt and
-  `hi` by ~3pt over `vanilla`. These are the two non-relational
-  families with the highest multi-target rate, exactly where
-  best-of-set was designed to help. `cot` lands in the same regime
-  on `cs` (+4.15pt) and `hi` (+3.61pt) — it inherits the loss-side
-  gain but does not amplify it.
+- **`lovasz` wins five of six families on `hit@0.50`.** The
+  exceptions: `abs` (where `no_scale` wins by 0.18pt — within
+  noise on n = 550). The boundary (Lovász) term that was middle of
+  the pack at ckpt 8 has compounded into a clear cross-family
+  lead by ckpt 10.
 
-- **`first_view` is roughly flat across the three CriterionV3
-  branches.** `no_scale` +0.24pt, `lovasz` +0.46pt, `cot` −1.21pt.
-  The egocentric narrative family is mostly single-target, so
-  best-of-set has nothing to grip on; the loss neither hurts nor
-  helps much.
+- **Best-of-set still drives the multi-target families, and Lovász
+  amplifies it.** Both `no_scale` (bos only) and `lovasz` (bos +
+  scl + Lovász) lift `cs` and `hi` substantially over `vanilla`:
+  +6.53 / +5.02 for `no_scale` on `cs` / `hi`, +8.92 / +8.20 for
+  `lovasz` on the same two families. `cot` lands between them:
+  +6.98 on `cs`, +4.67 on `hi`. The non-relational, multi-target
+  families are exactly where best-of-set was designed to help, and
+  the boundary term sharpens the per-instance commitment further.
 
-- **`rel_pos` separates the loss branches from `cot`.**
-  `no_scale` +2.07pt, `lovasz` +0.30pt, **`cot` −2.19pt**. This is
-  the only family where `cot` clearly underperforms the loss-only
-  branches at ckpt 8. A partially wrong landmark mask `M_1`
-  (unsupervised under W1-pure) propagates into the final decode for
-  distance-conditioned queries — exactly the failure mode the
-  deferred Tier-2 LLM rationale (B9 in
-  `chainv3_cot_ablation_tracker.md`) is built to address.
+- **`first_view` and `camera_view` separate `lovasz` from the rest.**
+  `lovasz` +2.03 / +2.49pt on `first_view` / `camera_view` vs.
+  `vanilla`; `no_scale` +0.67 / +1.56pt; `cot` +1.52 / +1.82pt.
+  Both families are mostly single-target, so the gain comes from
+  *quality* (boundary precision) rather than from selection — the
+  Lovász term picks the boundary well, while best-of-set alone has
+  nothing to grip on once the row is single-target.
 
-- **`abs` is roughly flat for everyone.** All four branches sit
-  within 0.9pt of one another. The small-instance failure mode
-  (P2) appears to be more about absolute scale than about loss
-  shape at this checkpoint — a sign that the scale-aware term may
-  not be doing as much as the design intended, or that the small-
-  instance threshold needs to be re-tuned.
+- **`rel_pos` is no longer where `cot` underperforms.** At ckpt 8
+  `cot` lost 2.19pt on `rel_pos` vs. vanilla; at ckpt 10 it gains
+  +0.83pt. Three more checkpoints fixed the regression. `lovasz`
+  still leads on `rel_pos` (+1.65pt vs. vanilla), but `cot` is now
+  positive too. The ckpt-8 hypothesis — "wrong landmark mask `M_1`
+  propagates into distance-conditioned decode" — was a ckpt-8
+  artefact, not a structural issue with the architecture.
 
-- **`camera_view` is the cleanest win for `lovasz`** (29.75 vs.
-  vanilla 27.91, +1.84pt). `cot` regresses slightly (−0.92pt). The
-  `no_scale` cell is unreliable on n = 61, so leave it out.
+- **`abs` is the small-instance family and `no_scale` wins it
+  narrowly.** `no_scale` 11.82, `lovasz` 11.64, `cot` 11.64,
+  `vanilla` 9.82. All three CriterionV3 branches close the gap to
+  vanilla (+1.88pt on average), but the differences among the
+  three are within noise on n = 550. The scale-aware term in
+  `lovasz`/`cot` is not doing more than best-of-set alone here,
+  which suggests the small-instance threshold may need to be
+  re-tuned (or the `abs` family genuinely tops out at this
+  recall-quality level for this stack).
 
 ### 4.3 Reading the four-branch `Δ_50`
 
-The single most informative cross-branch comparison at ckpt 8 is the
-`Δ_50` ranking:
+The single most informative cross-branch comparison at ckpt 10 is
+the `Δ_50` ranking:
 
 ```
-no_scale  +6.10pt   ← best-of-set only; highest per-instance gain
-lovasz    +4.41pt   ← bos + scl + boundary; small-instance recall
-cot       +4.00pt   ← chain v3 architecture, bos + scl
-chain     ?         ← not yet evaluated at ckpt 8
-vanilla   −2.16pt   ← single-[SEG] floor; multi-target spread
+lovasz    +5.72pt   ← bos + scl + Lovász; highest per-instance gain
+no_scale  +3.98pt   ← best-of-set only
+cot       +3.53pt   ← chain v3 architecture, bos + scl
+chain     ?         ← not yet evaluated at ckpt 10
+vanilla   −3.17pt   ← single-[SEG] floor; multi-target spread
 ```
 
-The gap between `vanilla` and the cheapest CriterionV3 row
-(`no_scale`) is **+8.26pt of `Δ_50`**, which is the headline number
-to remember from this checkpoint. The architectural extension
-(`cot`) buys an additional ≈ 1pt of multi-target gain over `vanilla`
-on `hi` and `cs`, but does not add to `Δ_50` over the loss-only
-branches at this checkpoint — its specific advantage is on the
-relational families, and that advantage has not yet shown up at
-ckpt 8 (in fact the `rel_pos` cell goes the wrong way). The
-8-checkpoint plan in §6 is set up to track whether this is a ckpt-8
-artefact or a genuine result.
+The gap between `vanilla` and the strongest CriterionV3 row
+(`lovasz`) is **+8.89pt of `Δ_50`**, which is the headline number
+to remember from this checkpoint — about 1pt wider than the
+ckpt-8 vanilla → `no_scale` gap of +8.26pt, but the *winner of the
+ranking has changed*. At ckpt 8 best-of-set alone (`no_scale`) was
+the per-instance leader; at ckpt 10 the boundary term (`lovasz`)
+has compounded enough training-time gradient signal to overtake it.
+The architectural extension (`cot`) is closing on the loss-only
+branches but does not yet beat them on `Δ_50` at ckpt 10; the
+8-checkpoint plan in §6 will see whether `cot` continues to close
+the gap, holds steady, or regresses.
 
 ---
 
@@ -566,13 +621,13 @@ If you only have time to look at one number per ablation row, look at
 `Δ_50 = hit@0.50 − A_50`. Reading it:
 
 - **`Δ_50 < 0`.** The model is averaging across multi-target referents
-  (failure mode P1). `vanilla` (−2.16pt at ckpt 8) sits here.
+  (failure mode P1). `vanilla` (−3.17pt at ckpt 10) sits here.
   The further negative, the worse the averaging behaviour.
 - **`Δ_50 ≈ 0`.** The model is roughly neutral — a single-target query
   dominates the average and the multi-target rows wash out.
 - **`Δ_50 > 0`.** The model commits to one referent. Every
-  CriterionV3-flavour branch lives here at ckpt 8: `no_scale` (+6.10),
-  `lovasz` (+4.41), `cot` (+4.00). The amount of positive `Δ_50`
+  CriterionV3-flavour branch lives here at ckpt 10: `lovasz` (+5.72),
+  `no_scale` (+3.98), `cot` (+3.53). The amount of positive `Δ_50`
   measures how aggressively the model is selecting.
 
 The flip from negative to positive `Δ_50` is, in our experience, a
@@ -599,15 +654,15 @@ together, with `Δ_50` as the diagnostic gap, gives an honest picture.
 
 ### 5.3 What `Acc@0.25` tells us that `Acc@0.50` does not
 
-Across the four ckpt-8 branches, `Acc@0.25` ranges 30.84–37.23 (a
-6.4pt spread) while `Acc@0.50` ranges 17.64–22.99 (a 5.4pt spread)
-in the same direction — the union-side regression that buys the
-per-instance gain. This matches the intuition that `Acc@0.25` is
-mostly a coverage / recall test ("did the model find the right
-region at all?"), while `Acc@0.50` is a quality test ("is the mask
-precise enough?"). CriterionV3's coverage hinge is doing its job
-when `A_25` does not collapse alongside `A_50` — at ckpt 8 the
-worst `A_25` (`no_scale` 30.84) is still well above the
+Across the four ckpt-10 branches, `Acc@0.25` ranges 32.62–37.70
+(a 5.1pt spread) while `Acc@0.50` ranges 18.55–21.85 (a 3.3pt
+spread) in the same direction — the union-side regression that
+buys the per-instance gain. This matches the intuition that
+`Acc@0.25` is mostly a coverage / recall test ("did the model find
+the right region at all?"), while `Acc@0.50` is a quality test
+("is the mask precise enough?"). CriterionV3's coverage hinge is
+doing its job when `A_25` does not collapse alongside `A_50` — at
+ckpt 10 the worst `A_25` (`lovasz` 32.62) is still well above the
 "prediction collapsed to nothing" floor we would expect if the
 hinge were absent. Watching the two together prevents the
 optimizer from satisfying `A_50` by sacrificing basic recall.
@@ -616,27 +671,31 @@ optimizer from satisfying `A_50` by sacrificing basic recall.
 
 A few subtle things to flag for honesty:
 
-- **Sample size differs across the four branches.** `vanilla`
-  n = 8,230, `lovasz` n = 8,229, `cot` n = 8,226, `no_scale`
-  n = 8,016. The first three are within 4 rows; `no_scale` is
-  ~210 rows lighter, with most of the gap on `camera_view`
-  (n = 61 vs. ~326). Use `no_scale`'s headline numbers for the
-  high-volume families (`cs`, `hi`) but treat its `camera_view` cell
-  as not directly comparable.
+- **Sample size is identical across all four branches at ckpt 10.**
+  All four eval runs report `n_total = 10,174` and per-family
+  `(cs 2,893, hi 2,892, camera_view 1,927, first_view 1,183,
+  rel_pos 729, abs 550)` — the pinned val JSON
+  (`scripts/build_filtered_surprise_val.py` →
+  `surprise_val_filtered_v1.json`) plus the OOM-leak fix in
+  `lavis/tasks/refer_seg_task.py` (no more accumulating `pred_pmask`
+  / `gt_pmask` in `val_result`) guarantees that every cell of every
+  table above is computed on the same denominator. This is a real
+  change from the ckpt-8 numbers, where the per-branch row counts
+  drifted by hundreds of rows.
 - **`vanilla` and the three CriterionV3-flavour branches differ in
   *both* loss and architecture.** All three loss/CoT branches share
   the chain v3 stack; `vanilla` is a single-`[SEG]` Reason3D
   backbone. The loss-on-the-same-architecture comparison (legacy vs.
   CriterionV3 on chain v3) requires the **chain** branch in §6.1,
   which has not yet completed.
-- **The joint CriterionV3-default ⊕ Chain v3 CoT row at ckpt 8 is
+- **The joint CriterionV3-default ⊕ Chain v3 CoT row at ckpt 10 is
   the `cot` row** (default = bos + scl). The `no_scale` branch and
   the `cot` branch therefore differ in *two* axes — loss flag (no
   scl) and architecture (no two-pass) — so a `cot − no_scale` delta
   cannot be cleanly attributed to either. The CoT-alone effect is
   the still-pending row "chain v3 single-pass with legacy loss"
   (= the **chain** branch).
-- **The 24.55% `vanilla` mIoU at ckpt 8 comes from our
+- **The 24.64% `vanilla` mIoU at ckpt 10 comes from our
   preprocessing** (§1.4); it is not directly comparable to the
   published upstream Surprise3D row at all. The right comparison is
   *internal* to this fork, on the same val split, with the same
@@ -694,29 +753,34 @@ At each of the 8 checkpoint indices we compute, for each branch:
 
 ### 6.3 Expected reading of the 8-checkpoint sweep
 
-Three concrete questions the sweep should answer; the ckpt-8 row in
-§4 is the first datapoint for each.
+Three concrete questions the sweep should answer; the ckpt-10 row
+in §4 is the latest datapoint we have for each (ckpt 10 is the
+strongest signal we trust right now — the eval pipeline is now
+reproducible end-to-end, see §4).
 
 - **Q1: Does the per-instance gain from CriterionV3 hold across
-  training time, or only at the well-tuned ckpt?** Ckpt 8 says yes
-  on this checkpoint: `Δ_50` is strongly positive for all three
-  CriterionV3-flavour branches and negative for `vanilla`. Whether
-  `Δ_50` stays positive at later ckpts (or starts to drift back as
-  the union-side regression compounds) is the open question the
-  remaining seven checkpoints will answer.
+  training time, or only at the well-tuned ckpt?** Ckpt 10 says
+  yes: `Δ_50` is strongly positive for all three
+  CriterionV3-flavour branches (+5.72 / +3.98 / +3.53 for
+  `lovasz` / `no_scale` / `cot`) and negative for `vanilla`
+  (−3.17). The vanilla → strongest CriterionV3 gap is +8.89pt of
+  `Δ_50`, slightly wider than at ckpt 8 (+8.26pt). The per-instance
+  advantage is not collapsing as training progresses; if anything
+  the boundary term is gaining ground.
 
 - **Q2: Does Chain v3 CoT's gain over the loss branches concentrate
   on the relational families across all checkpoints, or wash out
-  early?** Ckpt 8 says **no, at this checkpoint** — `cot` matches
-  the loss-only branches on `cs` / `hi` (the multi-target families)
-  but actively *under*performs them on `rel_pos` (the relational
-  family the architecture was designed for). The relational
-  advantage either emerges later or requires a different recipe
-  (Tier-2 LLM rationale, B9). The sweep tracks which.
+  early?** Ckpt 8 said no on `rel_pos` (cot −2.19pt vs. vanilla);
+  ckpt 10 says yes (cot +0.83pt vs. vanilla, but still behind
+  `lovasz`'s +1.65pt). The architectural signal on relational
+  families is emerging with training — the question is whether
+  `cot` eventually overtakes `lovasz` on `rel_pos` (its design
+  intent) or whether the boundary term keeps the lead. The
+  remaining checkpoints will tell.
 
 - **Q3: How does the chain v3 architecture (without CoT, without
   loss change) compare to vanilla?** Still open: the `chain` branch
-  has not yet completed its ckpt-8 evaluation. This is the missing
+  has not yet completed its ckpt-10 evaluation. This is the missing
   piece that lets us cleanly attribute the `cot − vanilla` gap
   between *the architecture* and *the loss*.
 
@@ -754,12 +818,14 @@ For completeness, the things this fork does *not* claim:
   masks are *not necessary* to get the architectural feedback to
   work; whether mined GT would push the numbers further is open and
   is the natural next experiment after the 8-checkpoint sweep.
-- **The reported Surprise3D val is filtered.** n = 8,229 after
-  dropping rows whose target id is missing from the sampled cloud.
-  Numbers are not on the full nominal 10,198. The filter is a
-  precondition for a well-defined GT mask, not a way to game the
-  metric, but it does mean the row count differs from the upstream
-  row count and direct row-wise comparisons are invalid.
+- **The reported Surprise3D val is filtered.** n = 10,174 in the
+  canonical pinned val JSON used at ckpt 10
+  (`surprise_val_filtered_v1.json`, see §9.4), after dropping rows
+  whose target id is missing from the sampled cloud. Numbers are not
+  on the full nominal 10,198. The filter is a precondition for a
+  well-defined GT mask, not a way to game the metric, but it does
+  mean the row count differs from the upstream row count and direct
+  row-wise comparisons are invalid.
 
 ---
 
@@ -832,7 +898,43 @@ REASON3D_INIT_CKPT=/path/to/reason3d_pretrained.pth NPROC=4 \
     bash scripts/run_surprise_finetune_chainv3_cot.sh
 ```
 
-### 9.4 Evaluate one checkpoint
+### 9.4 Pin the validation row set (do this once)
+
+The four full-val YAMLs under
+`Models/reason3d/lavis/projects/reason3d/val/` are pinned to a *pre-filtered*
+val JSON so every checkpoint sees a byte-identical row set, regardless of
+`.pth` mtimes, eval auto-resume, instance-id cache state, or which shell /
+day the eval is launched from. Build that pinned JSON once before the sweep:
+
+```bash
+cd Models/reason3d
+bash scripts/run_build_filtered_surprise_val.sh
+```
+
+This produces (defaults, override via env vars in the script):
+
+- `/nfs-stor/lan.wei/data/annotations/surprise_val_filtered_v1.json` — the
+  pinned annotations file (a strict subset of `surprise_val.json` with
+  rows whose `object_id` doesn't appear in the corresponding scene's
+  `sampled_instance_anno_id` removed).
+- `/nfs-stor/lan.wei/data/annotations/surprise_inst_id_cache_v1.json` — a
+  per-scene instance-id cache compatible with
+  `dataset_init.instance_id_cache_file` (handy if you ever flip the
+  runtime filter back on for ScanRefer / future work).
+
+The val YAMLs already point at the filtered JSON and set
+`dataset_init.filter_missing_gt_in_pth: false`, so the runtime filter is a
+no-op on this path. To go back to the unpinned, dataset-filter-at-runtime
+behaviour for one run, override on the CLI:
+
+```bash
+REASON3D_FILTER_MISSING_GT_IN_PTH=1 \
+    REASON3D_CKPT=/path/to/checkpoint.pth \
+    bash scripts/run_surprise_zeroshot_eval.sh \
+    -- datasets.3d_refer.build_info.annotations.test.storage=/nfs-stor/lan.wei/data/annotations/surprise_val.json
+```
+
+### 9.5 Evaluate one checkpoint
 
 ```bash
 cd Models/reason3d
@@ -844,6 +946,26 @@ This writes `metrics_v3_test.json` plus
 `qualitative/predictions.jsonl` (one row per query, including chain v3
 fields: `decoded_text_pass1`, `intermediate_point_iou`,
 `did_two_pass`).
+
+#### Eval determinism gotchas
+
+- **Auto-resume is OFF by default.** Set `REASON3D_AUTO_RESUME=1` only when
+  you intentionally want to recover from a crash. With auto-resume on, the
+  task gates rows by `(scene_id, ann_id)` keys already in
+  `qualitative/predictions.jsonl`; if a previous attempt left a partial /
+  inconsistent JSONL, the resumed run can land on a different `n` than a
+  clean single-shot run on the same YAML.
+- **Always use `NPROC=1` for headline numbers.** With `NPROC>1` the eval
+  uses `DistributedSampler`, which shards by dataset length; mixing that
+  with auto-resume's `apply_eval_resume_skip` (which mutates dataset
+  length) can change which rows each rank sees on a resume. The launcher
+  already prints a warning in this combination.
+- **Don't regenerate `.pth` files mid-sweep.** Even with the runtime
+  filter off, regenerating `processed_surprise_full_pth` will change the
+  GT mask data the metrics consume. If you must regenerate, rerun
+  `run_build_filtered_surprise_val.sh` so the pinned JSON tracks the new
+  `.pth` content, and re-evaluate every checkpoint to be honest about
+  comparability.
 
 ### 9.5 Per-question-type analysis
 
